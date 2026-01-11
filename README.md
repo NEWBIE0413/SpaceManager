@@ -26,21 +26,9 @@ When you select a project, you won't see a file list - you can only add agents. 
 - **Session Modes**: Start new sessions or resume previous ones
 - **Customizable Models**: Add your own CLI tools and commands
 
-## Screenshots
+## Demo
 
-```
-+-------------------+-----------------------------------------------+
-|                   |  [Claude] [Codex] [+]                         |
-|  WORKSPACES       +---------------------+-------------------------+
-|  > my-project     |  Claude             |  Codex                  |
-|    work-stuff     |  $ claude           |  $ codex                |
-|                   |  > Let's build...   |  > Ready to help...     |
-|  ---------------  |                     |                         |
-|  PROJECTS         |                     |                         |
-|  +- frontend/     |                     |                         |
-|  +- backend/      |                     |                         |
-+-------------------+---------------------+-------------------------+
-```
+![SpaceManager Demo](demo.gif)
 
 ## Requirements
 
