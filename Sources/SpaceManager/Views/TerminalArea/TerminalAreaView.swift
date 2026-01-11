@@ -64,12 +64,24 @@ struct SplitTerminalView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            HStack(spacing: 1) {
-                ForEach(appState.agentSessions) { session in
+            let sessionCount = CGFloat(appState.agentSessions.count)
+            let dividerCount = CGFloat(max(0, appState.agentSessions.count - 1))
+            let dividerWidth: CGFloat = 1
+            let sessionWidth = (geometry.size.width - dividerCount * dividerWidth) / sessionCount
+
+            HStack(spacing: 0) {
+                ForEach(Array(appState.agentSessions.enumerated()), id: \.element.id) { index, session in
                     SplitSessionView(
                         session: session,
-                        width: geometry.size.width / CGFloat(appState.agentSessions.count) - 1
+                        width: sessionWidth
                     )
+
+                    // Add divider between sessions (not after last one)
+                    if index < appState.agentSessions.count - 1 {
+                        Rectangle()
+                            .fill(Color(nsColor: .separatorColor))
+                            .frame(width: dividerWidth)
+                    }
                 }
             }
         }

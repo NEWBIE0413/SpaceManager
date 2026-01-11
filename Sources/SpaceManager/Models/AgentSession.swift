@@ -48,8 +48,9 @@ class AgentSession: Identifiable, ObservableObject, Equatable {
             terminal.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         }
 
-        terminal.nativeBackgroundColor = NSColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1.0)
-        terminal.nativeForegroundColor = NSColor(red: 0.9, green: 0.9, blue: 0.9, alpha: 1.0)
+        // Use system colors that adapt to light/dark mode
+        terminal.nativeBackgroundColor = NSColor.textBackgroundColor
+        terminal.nativeForegroundColor = NSColor.textColor
 
         self.terminalView = terminal
         return terminal
@@ -115,6 +116,7 @@ final class ManagedTerminalView: NSView {
     var sessionId: UUID?
     private var hoverFocusEnabled = false
     private var hoverTrackingArea: NSTrackingArea?
+    private var clickRecognizer: NSClickGestureRecognizer?
 
     override init(frame: NSRect) {
         terminal = LocalProcessTerminalView(frame: frame)
@@ -137,6 +139,11 @@ final class ManagedTerminalView: NSView {
             terminal.leadingAnchor.constraint(equalTo: leadingAnchor),
             terminal.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
+
+        let recognizer = NSClickGestureRecognizer(target: self, action: #selector(handleTerminalClick))
+        recognizer.buttonMask = 0x1
+        terminal.addGestureRecognizer(recognizer)
+        clickRecognizer = recognizer
     }
 
     // Forward terminal properties
@@ -203,6 +210,11 @@ final class ManagedTerminalView: NSView {
         notifySelection()
         window?.makeFirstResponder(terminal)
         super.mouseDown(with: event)
+    }
+
+    @objc private func handleTerminalClick() {
+        notifySelection()
+        window?.makeFirstResponder(terminal)
     }
 
     private func notifySelection() {

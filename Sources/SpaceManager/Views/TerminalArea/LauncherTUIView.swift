@@ -8,6 +8,33 @@ enum LauncherState {
     case customCommand
 }
 
+/// Color scheme that adapts to system appearance
+struct LauncherColors {
+    static var background: Color {
+        Color(nsColor: .textBackgroundColor)
+    }
+
+    static var primaryText: Color {
+        Color(nsColor: .labelColor)
+    }
+
+    static var secondaryText: Color {
+        Color(nsColor: .secondaryLabelColor)
+    }
+
+    static var tertiaryText: Color {
+        Color(nsColor: .tertiaryLabelColor)
+    }
+
+    static var selectedRowBackground: Color {
+        Color(nsColor: .selectedContentBackgroundColor).opacity(0.3)
+    }
+
+    static var inputBackground: Color {
+        Color(nsColor: .controlBackgroundColor)
+    }
+}
+
 /// TUI-style launcher view with two-step flow
 struct LauncherTUIView: View {
     @ObservedObject var session: AgentSession
@@ -43,7 +70,7 @@ struct LauncherTUIView: View {
     @ViewBuilder
     private var contentView: some View {
         ZStack {
-            Color(red: 0.1, green: 0.1, blue: 0.12)
+            LauncherColors.background
 
             VStack(spacing: 0) {
                 Spacer()
@@ -69,7 +96,7 @@ struct LauncherTUIView: View {
             // Header
             Text("SELECT MODEL")
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundColor(.white.opacity(0.6))
+                .foregroundColor(LauncherColors.secondaryText)
                 .tracking(2)
 
             // Model list
@@ -95,7 +122,7 @@ struct LauncherTUIView: View {
                 Text("[C] custom command  •  [E] edit models")
             }
             .font(.system(size: 10, design: .monospaced))
-            .foregroundColor(.white.opacity(0.4))
+            .foregroundColor(LauncherColors.tertiaryText)
         }
     }
 
@@ -110,7 +137,7 @@ struct LauncherTUIView: View {
                     .frame(width: 10, height: 10)
                 Text(model.name.uppercased())
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.8))
+                    .foregroundColor(LauncherColors.primaryText)
             }
 
             // Mode options
@@ -148,7 +175,7 @@ struct LauncherTUIView: View {
             // Help
             Text("[N] new  •  [R] resume  •  [Esc] back")
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(.white.opacity(0.4))
+                .foregroundColor(LauncherColors.tertiaryText)
         }
     }
 
@@ -158,7 +185,7 @@ struct LauncherTUIView: View {
         VStack(spacing: 16) {
             Text("CUSTOM COMMAND")
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundColor(.white.opacity(0.6))
+                .foregroundColor(LauncherColors.secondaryText)
                 .tracking(2)
 
             HStack(spacing: 8) {
@@ -169,7 +196,7 @@ struct LauncherTUIView: View {
                 TextField("", text: $customCommand)
                     .textFieldStyle(.plain)
                     .font(.system(size: 14, design: .monospaced))
-                    .foregroundColor(.white)
+                    .foregroundColor(LauncherColors.primaryText)
                     .frame(maxWidth: 300)
                     .onSubmit {
                         launchCustom()
@@ -177,12 +204,12 @@ struct LauncherTUIView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(Color.white.opacity(0.05))
+            .background(LauncherColors.inputBackground)
             .cornerRadius(6)
 
             Text("[Enter] run  •  [Esc] back")
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(.white.opacity(0.4))
+                .foregroundColor(LauncherColors.tertiaryText)
         }
     }
 
@@ -240,7 +267,7 @@ struct ModelRow: View {
 
             Text(model.name)
                 .font(.system(size: 14, weight: .medium, design: .monospaced))
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(LauncherColors.primaryText)
 
             Spacer()
 
@@ -254,7 +281,7 @@ struct ModelRow: View {
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.white.opacity(0.08) : Color.clear)
+                .fill(isSelected ? LauncherColors.selectedRowBackground : Color.clear)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(isSelected ? model.color.opacity(0.5) : Color.clear, lineWidth: 1)
@@ -282,11 +309,11 @@ struct ModeRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.9))
+                    .foregroundColor(LauncherColors.primaryText)
 
                 Text(command)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(LauncherColors.secondaryText)
             }
 
             Spacer()
@@ -301,7 +328,7 @@ struct ModeRow: View {
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.white.opacity(0.08) : Color.clear)
+                .fill(isSelected ? LauncherColors.selectedRowBackground : Color.clear)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(isSelected ? color.opacity(0.5) : Color.clear, lineWidth: 1)
