@@ -1,6 +1,6 @@
 # Reddit Promotional Post
 
-**Title:** I made an IDE that has no code editor - just terminals for AI agents
+**Title:** I made a workspace manager for people who use CLI agents (Claude, Codex, Gemini) all day
 
 **Tag:** Showcase
 
@@ -8,38 +8,41 @@
 
 **Body:**
 
-I built a macOS app specifically for "vibe coding" - where you're not actually looking at code, just talking to AI agents all day.
+If you're someone who spends most of your day running AI agents in the terminal - this might be for you.
 
-The interesting part: VS Code is code-centric (file trees, editors, IntelliSense). But when I'm vibe coding, I literally never use any of that. I just run `claude` or `codex` in a terminal and talk to agents. So I built an IDE that's terminal-centric instead.
+I found myself constantly juggling multiple terminal windows, switching between projects, and losing track of which agent was working on what. So I built a simple workspace manager specifically designed around CLI-based AI workflows.
 
-**What makes it different:**
+**Who this is for:**
 
-- No file explorer - when you select a project, you only see terminals
-- No code editor - your agents write all the code
-- Multi-agent support - run Claude, Codex, Gemini side-by-side with auto-splitting panes
-- **Persistent workspaces** - unlike VS Code or standard shells, your workspace and agents are perfectly preserved when switching between workspaces, and persist even after restarting the app. It's truly built for CLI-based agents.
-- TUI launcher - press `1` for Claude, `2` for Codex, `3` for Gemini (like a fighting game character select)
+- You use Claude Code, Codex CLI, Gemini CLI, or similar tools daily
+- You often run multiple agents in parallel on different tasks
+- You switch between several projects throughout the day
+- You want your agent sessions to persist without manually managing terminal windows
 
-**How I actually use it:**
+**What it does:**
 
-1. Open a workspace
-2. Press `+` to spawn agents
-3. Give each agent a different task
-4. Watch them work in parallel
-5. That's it. That's the whole workflow.
+- **Multi-agent view** - Run 2-3 agents side by side with auto-splitting panes. Give each one a different task and watch them work in parallel.
+- **Persistent workspaces** - Your agents stay exactly where you left them when switching projects. Even after restarting the app, everything is preserved.
+- **Quick launcher** - Press `1` for Claude, `2` for Codex, `3` for Gemini. Start a new session or resume a previous one with a single keystroke.
+- **Workspace organization** - Group your projects into workspaces. Select a project and all your agents automatically switch to that directory.
 
-**Features:**
+**My typical workflow:**
 
-- Drag & drop tabs to reorder agents
-- New session or resume previous conversations
-- Add custom models with your own commands
-- Workspaces to organize multiple projects
+1. Select a workspace (e.g., "side-project")
+2. Spawn 2-3 agents with `+`
+3. Ask Agent 1 to refactor the auth system
+4. Ask Agent 2 to write tests
+5. Ask Agent 3 to update documentation
+6. Switch to another workspace when needed - agents are preserved
+7. Come back later and resume right where I left off
 
-The whole point is to stop pretending we need a traditional IDE when we're just prompting AI all day. If your workflow is 90% talking to agents, why have 90% of your screen dedicated to code you're not reading?
+**It's intentionally minimal** - no file explorer, no code editor, no bells and whistles. Just terminals and the tools to manage them efficiently.
 
-Built with Swift/SwiftUI. Native macOS app, no Electron.
+Built with Swift/SwiftUI for macOS. Native app, lightweight, and fast.
 
-Demo GIF and source code: [https://github.com/NEWBIE0413/SpaceManager](https://github.com/NEWBIE0413/SpaceManager)
+Would love to hear your feedback or feature suggestions!
+
+Demo + Source: [https://github.com/NEWBIE0413/SpaceManager](https://github.com/NEWBIE0413/SpaceManager)
 
 ---
 
@@ -47,5 +50,5 @@ Demo GIF and source code: [https://github.com/NEWBIE0413/SpaceManager](https://g
 - r/ClaudeAI
 - r/ChatGPTCoding
 - r/MacApps
-- r/Swift
-- r/LocalLLaMA (if you add local model support)
+- r/SideProject
+- r/ProductivityApps
