@@ -124,16 +124,16 @@ struct SplitSessionView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(
-                isSelected
-                    ? Color.accentColor.opacity(0.15)
-                    : Color(nsColor: .windowBackgroundColor)
-            )
+            .background(Color(nsColor: .windowBackgroundColor))
 
             // Terminal or Launcher - uses SessionContentView which observes the session
             SessionContentView(session: session)
         }
-        .border(isSelected ? Color.accentColor : Color.clear, width: 1)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+        )
         .frame(width: width)
         .onTapGesture {
             appState.selectAgentSession(session)
