@@ -49,7 +49,7 @@ swift build -c release
 ### Run
 
 ```bash
-swift run WorkspaceManager
+swift run SpaceManager
 ```
 
 Or open in Xcode and build:
@@ -97,8 +97,8 @@ open Package.swift
 ## Project Structure
 
 ```
-Sources/WorkspaceManager/
-├── WorkspaceManagerApp.swift    # App entry point
+Sources/SpaceManager/
+├── SpaceManagerApp.swift        # App entry point
 ├── Models/
 │   ├── Workspace.swift          # Workspace & Project models
 │   ├── CommandPreset.swift      # Model configurations

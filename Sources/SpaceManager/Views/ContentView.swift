@@ -320,6 +320,23 @@ struct SettingsSheet: View {
             // Content
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    // Focus section
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Focus")
+                            .font(.headline)
+
+                        Text("Choose how agent focus changes in split view.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Picker("Agent Focus", selection: $appState.agentFocusMode) {
+                            ForEach(AgentFocusMode.allCases) { mode in
+                                Text(mode.title).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.radioGroup)
+                    }
+
                     // Models section
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {

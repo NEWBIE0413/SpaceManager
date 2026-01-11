@@ -19,13 +19,18 @@ struct LauncherTUIView: View {
     var models: [ModelConfig] {
         appState.storage.modelConfigs
     }
+    private var modelShortcutHint: String {
+        models.count >= 10 ? "[1-9,0] select" : "[1-\(min(models.count, 9))] select"
+    }
 
     var body: some View {
         LauncherKeyboardView(
+            sessionId: session.id,
             state: $state,
             selectedIndex: $selectedIndex,
             customCommand: $customCommand,
             modelCount: models.count,
+            focusMode: appState.agentFocusMode,
             onLaunchNew: { launchNew() },
             onLaunchResume: { launchResume() },
             onLaunchCustom: { launchCustom() },
@@ -86,7 +91,7 @@ struct LauncherTUIView: View {
 
             // Help
             VStack(spacing: 2) {
-                Text("[1-\(min(models.count, 9))] select  •  [↑↓] navigate  •  [Enter] confirm")
+                Text("\(modelShortcutHint)  •  [↑↓] navigate  •  [Enter] confirm")
                 Text("[C] custom command  •  [E] edit models")
             }
             .font(.system(size: 10, design: .monospaced))
@@ -308,10 +313,12 @@ struct ModeRow: View {
 // MARK: - Keyboard Handler
 
 struct LauncherKeyboardView<Content: View>: NSViewRepresentable {
+    let sessionId: UUID
     @Binding var state: LauncherState
     @Binding var selectedIndex: Int
     @Binding var customCommand: String
     let modelCount: Int
+    let focusMode: AgentFocusMode
     let onLaunchNew: () -> Void
     let onLaunchResume: () -> Void
     let onLaunchCustom: () -> Void
@@ -320,6 +327,8 @@ struct LauncherKeyboardView<Content: View>: NSViewRepresentable {
 
     func makeNSView(context: Context) -> LauncherNSView {
         let view = LauncherNSView()
+        view.sessionId = sessionId
+        view.focusMode = focusMode
 
         let hostingView = NSHostingView(rootView: AnyView(content()))
         hostingView.translatesAutoresizingMaskIntoConstraints = false
@@ -337,10 +346,6 @@ struct LauncherKeyboardView<Content: View>: NSViewRepresentable {
             coordinator.handleKeyDown(event)
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            view.window?.makeFirstResponder(view)
-        }
-
         return view
     }
 
@@ -355,6 +360,8 @@ struct LauncherKeyboardView<Content: View>: NSViewRepresentable {
             onLaunchCustom: onLaunchCustom,
             onSelectModel: onSelectModel
         )
+        nsView.sessionId = sessionId
+        nsView.focusMode = focusMode
 
         // Update content
         if let hostingView = nsView.subviews.first as? NSHostingView<AnyView> {
@@ -435,6 +442,11 @@ struct LauncherKeyboardView<Content: View>: NSViewRepresentable {
 
             default:
                 // Number keys
+                if chars == "0", modelCount >= 10 {
+                    selectedIndex.wrappedValue = 9
+                    onSelectModel?(9)
+                    return true
+                }
                 if let num = Int(chars), num >= 1, num <= modelCount {
                     selectedIndex.wrappedValue = num - 1
                     onSelectModel?(num - 1)
@@ -458,6 +470,14 @@ struct LauncherKeyboardView<Content: View>: NSViewRepresentable {
         }
 
         private func handleModeSelection(keyCode: UInt16, chars: String, state: Binding<LauncherState>, selectedIndex: Binding<Int>) -> Bool {
+            let hasResume: Bool
+            if case .selectMode(let model) = state.wrappedValue {
+                hasResume = !model.resumeCommand.isEmpty
+            } else {
+                hasResume = false
+            }
+            let maxIndex = hasResume ? 1 : 0
+
             switch keyCode {
             case 126: // Up
                 if selectedIndex.wrappedValue > 0 {
@@ -466,7 +486,7 @@ struct LauncherKeyboardView<Content: View>: NSViewRepresentable {
                 return true
 
             case 125: // Down
-                if selectedIndex.wrappedValue < 1 {
+                if selectedIndex.wrappedValue < maxIndex {
                     selectedIndex.wrappedValue += 1
                 }
                 return true
@@ -474,7 +494,7 @@ struct LauncherKeyboardView<Content: View>: NSViewRepresentable {
             case 36: // Enter
                 if selectedIndex.wrappedValue == 0 {
                     onLaunchNew?()
-                } else {
+                } else if hasResume {
                     onLaunchResume?()
                 }
                 return true
@@ -490,7 +510,9 @@ struct LauncherKeyboardView<Content: View>: NSViewRepresentable {
                     return true
                 }
                 if chars == "r" {
-                    onLaunchResume?()
+                    if hasResume {
+                        onLaunchResume?()
+                    }
                     return true
                 }
             }
@@ -512,8 +534,55 @@ struct LauncherKeyboardView<Content: View>: NSViewRepresentable {
 
 class LauncherNSView: NSView {
     var keyHandler: ((NSEvent) -> Bool)?
+    var sessionId: UUID?
+    var focusMode: AgentFocusMode = .click {
+        didSet {
+            if oldValue != focusMode {
+                updateTrackingAreas()
+            }
+        }
+    }
 
-    override var acceptsFirstResponder: Bool { true }
+    private var focusAllowed = false
+    private var hoverTrackingArea: NSTrackingArea?
+
+    override var acceptsFirstResponder: Bool { focusAllowed }
+
+    override func becomeFirstResponder() -> Bool {
+        guard focusAllowed else { return false }
+        return super.becomeFirstResponder()
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let result = super.resignFirstResponder()
+        focusAllowed = false
+        return result
+    }
+
+    override func updateTrackingAreas() {
+        if let hoverTrackingArea = hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+            self.hoverTrackingArea = nil
+        }
+
+        if focusMode == .hover {
+            let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect]
+            let trackingArea = NSTrackingArea(rect: .zero, options: options, owner: self, userInfo: nil)
+            addTrackingArea(trackingArea)
+            hoverTrackingArea = trackingArea
+        }
+
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        if focusMode == .hover {
+            notifySelection()
+            focusAllowed = true
+            window?.makeFirstResponder(self)
+        }
+        super.mouseEntered(with: event)
+    }
 
     override func keyDown(with event: NSEvent) {
         if keyHandler?(event) != true {
@@ -523,7 +592,21 @@ class LauncherNSView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         super.mouseDown(with: event)
+        if window?.firstResponder is NSTextView {
+            return
+        }
+        focusAllowed = true
+        notifySelection()
         window?.makeFirstResponder(self)
+    }
+
+    private func notifySelection() {
+        guard let sessionId = sessionId else { return }
+        NotificationCenter.default.post(
+            name: .agentSelectionRequested,
+            object: nil,
+            userInfo: ["id": sessionId]
+        )
     }
 }
 

@@ -14,6 +14,12 @@ class WorkspaceStorage: ObservableObject {
     /// Base directory for storage
     private var storageDirectory: URL {
         let homeDir = fileManager.homeDirectoryForCurrentUser
+        return homeDir.appendingPathComponent(".space-manager")
+    }
+
+    /// Legacy directory for migration
+    private var legacyStorageDirectory: URL {
+        let homeDir = fileManager.homeDirectoryForCurrentUser
         return homeDir.appendingPathComponent(".workspace-manager")
     }
 
@@ -42,6 +48,10 @@ class WorkspaceStorage: ObservableObject {
 
     private func ensureStorageDirectoryExists() {
         do {
+            if fileManager.fileExists(atPath: legacyStorageDirectory.path),
+               !fileManager.fileExists(atPath: storageDirectory.path) {
+                try fileManager.moveItem(at: legacyStorageDirectory, to: storageDirectory)
+            }
             try fileManager.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
         } catch {
             print("Warning: Could not create storage directory: \(error)")

@@ -48,15 +48,13 @@ struct SessionContentView: View {
     @ObservedObject var session: AgentSession
 
     var body: some View {
-        Group {
+        ZStack {
             if session.hasLaunchedCommand {
                 AgentTerminalView(session: session)
             } else {
                 LauncherTUIView(session: session)
             }
         }
-        // Force view identity to change when launch state changes
-        .id("\(session.id)-\(session.hasLaunchedCommand)")
     }
 }
 
@@ -127,6 +125,11 @@ struct SplitSessionView: View {
         .frame(width: width)
         .onTapGesture {
             appState.selectAgentSession(session)
+        }
+        .onHover { hovering in
+            if hovering, appState.agentFocusMode == .hover {
+                appState.selectAgentSession(session)
+            }
         }
     }
 }

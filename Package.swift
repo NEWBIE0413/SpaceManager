@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "WorkspaceManager",
+    name: "SpaceManager",
     platforms: [
         .macOS(.v14)
     ],
@@ -11,11 +11,11 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "WorkspaceManager",
+            name: "SpaceManager",
             dependencies: [
                 .product(name: "SwiftTerm", package: "SwiftTerm")
             ],
-            path: "Sources/WorkspaceManager"
+            path: "Sources/SpaceManager"
         )
     ]
 )
