@@ -20,6 +20,7 @@ When you select a project, you won't see a file list - you can only add agents. 
 
 - **Terminal-First Design**: No file trees, no code editors - just terminals and agents
 - **Multi-Agent Support**: Run multiple AI agents side-by-side with auto-splitting panes
+- **Persistent Workspaces**: Unlike VS Code or standard shells, your workspace and agents are perfectly preserved when switching between workspaces - and persist completely even after restarting the app
 - **Quick Launcher**: TUI-based launcher for AI CLI tools (Claude, Codex, Gemini)
 - **Workspace Management**: Organize your projects into workspaces
 - **Drag & Drop Tabs**: Reorder agent tabs with smooth animations
