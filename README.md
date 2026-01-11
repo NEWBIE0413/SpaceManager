@@ -1,34 +1,45 @@
 # SpaceManager
 
-A native macOS workspace manager with integrated terminal for AI CLI tools.
+A terminal-centric IDE for the age of AI agents.
 
 ![macOS](https://img.shields.io/badge/macOS-14.0+-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.9+-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
+## Why SpaceManager?
+
+These days, when I do "vibe coding," I hardly look at the code. I'm always just talking to agents after running them in VS Code or a command shell. But VS Code is code-centric, not terminal-centric. Well, I guess that's natural since it's a traditional IDE.
+
+**That's why I created an IDE exclusively for the CLI.**
+
+When you select a project, you won't see a file list - you can only add agents. Run multiple agents, execute them easily with shortcuts, and manage them with ease.
+
+**Happy vibe coding!**
+
 ## Features
 
-- **Workspace Management**: Organize multiple projects into workspaces
-- **Integrated Terminal**: Full terminal emulation powered by SwiftTerm
+- **Terminal-First Design**: No file trees, no code editors - just terminals and agents
 - **Multi-Agent Support**: Run multiple AI agents side-by-side with auto-splitting panes
 - **Quick Launcher**: TUI-based launcher for AI CLI tools (Claude, Codex, Gemini)
+- **Workspace Management**: Organize your projects into workspaces
+- **Drag & Drop Tabs**: Reorder agent tabs with smooth animations
 - **Session Modes**: Start new sessions or resume previous ones
-- **Customizable**: Add your own models and commands
+- **Customizable Models**: Add your own CLI tools and commands
 
 ## Screenshots
 
 ```
-┌─────────────────┬───────────────────────────────────────────────────┐
-│                 │  [Agent 1] [Agent 2] [+]                          │
-│  WORKSPACES     ├─────────────────────┬─────────────────────────────┤
-│  ▶ my-project   │  Agent 1            │  Agent 2                    │
-│    work-stuff   │  $ claude           │  $ codex                    │
-│                 │  > Hello!           │  > Ready...                 │
-│  ─────────────  │                     │                             │
-│  PROJECTS       │                     │                             │
-│  ├─ src/        │                     │                             │
-│  └─ lib/        │                     │                             │
-└─────────────────┴─────────────────────┴─────────────────────────────┘
++-------------------+-----------------------------------------------+
+|                   |  [Claude] [Codex] [+]                         |
+|  WORKSPACES       +---------------------+-------------------------+
+|  > my-project     |  Claude             |  Codex                  |
+|    work-stuff     |  $ claude           |  $ codex                |
+|                   |  > Let's build...   |  > Ready to help...     |
+|  ---------------  |                     |                         |
+|  PROJECTS         |                     |                         |
+|  +- frontend/     |                     |                         |
+|  +- backend/      |                     |                         |
++-------------------+---------------------+-------------------------+
 ```
 
 ## Requirements
@@ -52,7 +63,7 @@ swift build -c release
 swift run SpaceManager
 ```
 
-Or open in Xcode and build:
+Or open in Xcode:
 ```bash
 open Package.swift
 ```
@@ -69,17 +80,22 @@ open Package.swift
 - Use the TUI launcher to select an AI model
 - Choose "New Session" or "Resume" mode
 - Multiple agents auto-split the terminal pane
+- Drag tabs to reorder agents
 
 ### Keyboard Shortcuts (in Launcher)
-- `1-4` - Quick select model
-- `N` - New session
-- `R` - Resume session
-- `C` - Custom command
-- `ESC` - Go back
+| Key | Action |
+|-----|--------|
+| `1-9, 0` | Quick select model |
+| `N` | New session |
+| `R` | Resume session |
+| `C` | Custom command |
+| `E` | Edit models |
+| `ESC` | Go back |
 
 ### Settings
 - Configure model commands in Settings (gear icon)
 - Add custom models with new/resume commands
+- Drag to reorder models
 
 ## Supported AI CLI Tools
 
@@ -115,7 +131,9 @@ Sources/SpaceManager/
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+This application is still a work in progress. I look forward to your contributions!
+
+Feel free to submit a Pull Request or open an Issue.
 
 ## License
 
