@@ -12,6 +12,13 @@ class AgentSession: Identifiable, ObservableObject, Equatable {
     @Published var isRunning: Bool = false
     @Published var hasLaunchedCommand: Bool = false
     @Published var launchCommand: String = ""
+    @Published var lastModelId: UUID?
+    @Published var lastModelName: String?
+    @Published var lastLaunchKind: AgentLaunchKind?
+    @Published var lastLaunchCommand: String?
+    @Published var sessionTitle: String?
+
+    var stateDidChange: (() -> Void)?
 
     // Terminal view - owned by the session, not the SwiftUI view
     private(set) var terminalView: ManagedTerminalView?
@@ -23,10 +30,44 @@ class AgentSession: Identifiable, ObservableObject, Equatable {
         self.workingDirectory = workingDirectory
     }
 
-    func launch(command: String) {
+    func launch(command: String, modelId: UUID? = nil, modelName: String? = nil, kind: AgentLaunchKind = .custom) {
         self.launchCommand = command
         self.hasLaunchedCommand = true
         self.isRunning = true
+        self.lastModelId = modelId
+        self.lastModelName = modelName
+        self.lastLaunchKind = kind
+        self.lastLaunchCommand = command
+        stateDidChange?()
+    }
+
+    var displayName: String {
+        if let lastModelName,
+           !lastModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return lastModelName
+        }
+
+        if let lastLaunchKind, lastLaunchKind == .shell {
+            return "Shell"
+        }
+
+        if let lastLaunchCommand,
+           !lastLaunchCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return commandDisplayName(lastLaunchCommand)
+        }
+
+        return name
+    }
+
+    private func commandDisplayName(_ command: String) -> String {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return name }
+        let tokens = trimmed.split { $0 == " " || $0 == "\t" }
+        let commandToken = tokens.first { !$0.contains("=") } ?? tokens.first
+        guard let token = commandToken else { return name }
+        let tokenString = String(token)
+        let base = (tokenString as NSString).lastPathComponent
+        return base.isEmpty ? tokenString : base
     }
 
     /// Get or create the terminal view for this session
@@ -39,18 +80,27 @@ class AgentSession: Identifiable, ObservableObject, Equatable {
         terminal.translatesAutoresizingMaskIntoConstraints = false
         terminal.sessionId = id
 
-        // Use Menlo font which handles CJK/Korean characters better
-        // Fall back to system monospaced if Menlo is not available
+        // Prefer CJK-friendly monospace fonts to reduce wide-character gaps.
         let fontSize: CGFloat = 13
-        if let menlo = NSFont(name: "Menlo", size: fontSize) {
-            terminal.font = menlo
-        } else {
-            terminal.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        }
+        let fontCandidates = [
+            "D2Coding",
+            "NanumGothicCoding",
+            "Noto Sans Mono CJK KR",
+            "SF Mono",
+            "Menlo"
+        ]
+        terminal.font = fontCandidates
+            .compactMap { NSFont(name: $0, size: fontSize) }
+            .first
+            ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
 
         // Use system colors that adapt to light/dark mode
         terminal.nativeBackgroundColor = NSColor.textBackgroundColor
         terminal.nativeForegroundColor = NSColor.textColor
+        terminal.caretColor = NSColor.textBackgroundColor
+        terminal.setCursorStyle(.steadyBar)
+        terminal.terminal.getTerminal().options.alternateBufferEnabled = false
+        terminal.terminal.processDelegate = self
 
         self.terminalView = terminal
         return terminal
@@ -77,14 +127,14 @@ class AgentSession: Identifiable, ObservableObject, Equatable {
         terminal.startProcess(executable: shell, execName: shellName)
 
         // Change to working directory first, then run launch command
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             guard let self = self else { return }
             // cd to working directory
             self.terminalView?.send(txt: "cd \"\(startDir)\" && clear\n")
 
             // Run launch command if set
             if !self.launchCommand.isEmpty {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     self.terminalView?.send(txt: self.launchCommand + "\n")
                 }
             }
@@ -109,29 +159,86 @@ class AgentSession: Identifiable, ObservableObject, Equatable {
     }
 }
 
+extension AgentSession {
+    convenience init(snapshot: AgentSessionSnapshot) {
+        self.init(id: snapshot.id, name: snapshot.name, workingDirectory: snapshot.workingDirectory)
+        self.lastModelId = snapshot.lastModelId
+        self.lastModelName = snapshot.lastModelName
+        self.lastLaunchKind = snapshot.lastLaunchKind
+        self.lastLaunchCommand = snapshot.lastLaunchCommand
+        self.sessionTitle = snapshot.sessionTitle
+        self.hasLaunchedCommand = false
+        self.isRunning = false
+        self.launchCommand = ""
+    }
+
+    func snapshot() -> AgentSessionSnapshot {
+        AgentSessionSnapshot(
+            id: id,
+            name: name,
+            workingDirectory: workingDirectory,
+            lastModelId: lastModelId,
+            lastModelName: lastModelName,
+            lastLaunchKind: lastLaunchKind,
+            lastLaunchCommand: lastLaunchCommand,
+            sessionTitle: sessionTitle
+        )
+    }
+}
+
+extension AgentSession: LocalProcessTerminalViewDelegate {
+    func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
+
+    func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newTitle = trimmed.isEmpty ? nil : trimmed
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if self.sessionTitle != newTitle {
+                self.sessionTitle = newTitle
+            }
+        }
+    }
+
+    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+
+    func processTerminated(source: TerminalView, exitCode: Int32?) {
+        DispatchQueue.main.async { [weak self] in
+            self?.isRunning = false
+        }
+    }
+}
+
 /// Container view that manages focus for the terminal.
 /// Uses composition since LocalProcessTerminalView methods can't be overridden.
 final class ManagedTerminalView: NSView {
-    let terminal: LocalProcessTerminalView
+    let terminal: FixedCursorTerminalView
     var sessionId: UUID?
+    private var selectionActive = false
     private var hoverFocusEnabled = false
     private var hoverTrackingArea: NSTrackingArea?
-    private var clickRecognizer: NSClickGestureRecognizer?
+    private var keyMonitor: Any?
 
     override init(frame: NSRect) {
-        terminal = LocalProcessTerminalView(frame: frame)
+        terminal = FixedCursorTerminalView(frame: frame)
         super.init(frame: frame)
         setupTerminal()
     }
 
     required init?(coder: NSCoder) {
-        terminal = LocalProcessTerminalView(frame: .zero)
+        terminal = FixedCursorTerminalView(frame: .zero)
         super.init(coder: coder)
         setupTerminal()
     }
 
     private func setupTerminal() {
         terminal.translatesAutoresizingMaskIntoConstraints = false
+        terminal.onMouseDownAction = { [weak self] in
+            self?.notifySelection()
+            if let terminal = self?.terminal {
+                self?.window?.makeFirstResponder(terminal)
+            }
+        }
         addSubview(terminal)
         NSLayoutConstraint.activate([
             terminal.topAnchor.constraint(equalTo: topAnchor),
@@ -139,11 +246,6 @@ final class ManagedTerminalView: NSView {
             terminal.leadingAnchor.constraint(equalTo: leadingAnchor),
             terminal.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
-
-        let recognizer = NSClickGestureRecognizer(target: self, action: #selector(handleTerminalClick))
-        recognizer.buttonMask = 0x1
-        terminal.addGestureRecognizer(recognizer)
-        clickRecognizer = recognizer
     }
 
     // Forward terminal properties
@@ -162,6 +264,16 @@ final class ManagedTerminalView: NSView {
         set { terminal.nativeForegroundColor = newValue }
     }
 
+    var caretColor: NSColor {
+        get { terminal.caretColor }
+        set { terminal.caretColor = newValue }
+    }
+
+    func setCursorStyle(_ style: CursorStyle) {
+        terminal.preferredCursorStyle = style
+        terminal.applyCursorPreferences()
+    }
+
     func startProcess(executable: String, execName: String) {
         terminal.startProcess(executable: executable, execName: execName)
     }
@@ -174,7 +286,42 @@ final class ManagedTerminalView: NSView {
         window?.makeFirstResponder(terminal)
     }
 
-    override var acceptsFirstResponder: Bool { false }
+    override var acceptsFirstResponder: Bool { true }
+
+    override func becomeFirstResponder() -> Bool {
+        window?.makeFirstResponder(terminal)
+        return true
+    }
+
+    override func keyDown(with event: NSEvent) {
+        terminal.keyDown(with: event)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        terminal.performKeyEquivalent(with: event)
+    }
+
+    func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        terminal.validateUserInterfaceItem(item)
+    }
+
+    @objc func copy(_ sender: Any?) {
+        terminal.copy(sender ?? self)
+    }
+
+    @objc func paste(_ sender: Any?) {
+        terminal.paste(sender ?? self)
+    }
+
+    override func selectAll(_ sender: Any?) {
+        terminal.selectAll(sender)
+    }
+
+    func setSelectionActive(_ active: Bool) {
+        guard selectionActive != active else { return }
+        selectionActive = active
+        updateKeyMonitor()
+    }
 
     func setHoverFocusEnabled(_ enabled: Bool) {
         guard hoverFocusEnabled != enabled else { return }
@@ -212,11 +359,6 @@ final class ManagedTerminalView: NSView {
         super.mouseDown(with: event)
     }
 
-    @objc private func handleTerminalClick() {
-        notifySelection()
-        window?.makeFirstResponder(terminal)
-    }
-
     private func notifySelection() {
         guard let sessionId = sessionId else { return }
         NotificationCenter.default.post(
@@ -224,5 +366,60 @@ final class ManagedTerminalView: NSView {
             object: nil,
             userInfo: ["id": sessionId]
         )
+    }
+
+    private func updateKeyMonitor() {
+        if selectionActive {
+            if keyMonitor == nil {
+                keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                    guard let self else { return event }
+                    guard self.selectionActive, event.window === self.window else { return event }
+                    guard self.window?.isKeyWindow == true else { return event }
+                    if self.window?.firstResponder is NSTextView {
+                        return event
+                    }
+
+                    if self.window?.firstResponder !== self.terminal {
+                        self.window?.makeFirstResponder(self.terminal)
+                    }
+                    return event
+                }
+            }
+        } else if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
+    }
+
+    deinit {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+        }
+    }
+}
+
+final class FixedCursorTerminalView: LocalProcessTerminalView {
+    var preferredCursorStyle: CursorStyle = .steadyBar
+    var preferredCursorColor: NSColor = NSColor.textBackgroundColor
+    var onMouseDownAction: (() -> Void)?
+
+    func applyCursorPreferences() {
+        caretColor = preferredCursorColor
+        terminal.setCursorStyle(preferredCursorStyle)
+    }
+
+    override func cursorStyleChanged(source: Terminal, newStyle: CursorStyle) {
+        super.cursorStyleChanged(source: source, newStyle: preferredCursorStyle)
+        caretColor = preferredCursorColor
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyCursorPreferences()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        onMouseDownAction?()
+        super.mouseDown(with: event)
     }
 }

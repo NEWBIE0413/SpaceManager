@@ -83,3 +83,10 @@ extension Color {
         return String(format: "%02X%02X%02X", r, g, b)
     }
 }
+
+extension Color {
+    /// Warm pink for active/selected text
+    static let warmPink = Color(red: 0.90, green: 0.55, blue: 0.58)
+    /// Slightly muted warm pink for section headers
+    static let warmPinkMuted = Color(red: 0.78, green: 0.48, blue: 0.50)
+}

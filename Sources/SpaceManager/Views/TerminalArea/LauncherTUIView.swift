@@ -23,15 +23,15 @@ struct LauncherColors {
     }
 
     static var tertiaryText: Color {
-        Color(nsColor: .tertiaryLabelColor)
+        Color(nsColor: .tertiaryLabelColor).opacity(0.6)
     }
 
     static var selectedRowBackground: Color {
-        Color(nsColor: .selectedContentBackgroundColor).opacity(0.3)
+        Color.primary.opacity(0.06)
     }
 
     static var inputBackground: Color {
-        Color(nsColor: .controlBackgroundColor)
+        Color.primary.opacity(0.04)
     }
 }
 
@@ -42,6 +42,7 @@ struct LauncherTUIView: View {
     @State private var state: LauncherState = .selectModel
     @State private var selectedIndex: Int = 0
     @State private var customCommand: String = ""
+    @State private var didRestoreSelection = false
 
     var models: [ModelConfig] {
         appState.storage.modelConfigs
@@ -64,6 +65,9 @@ struct LauncherTUIView: View {
             onSelectModel: { selectModel(at: $0) }
         ) {
             contentView
+        }
+        .onAppear {
+            restoreSessionDefaultsIfNeeded()
         }
     }
 
@@ -92,15 +96,13 @@ struct LauncherTUIView: View {
     // MARK: - Model Selection View
 
     private var modelSelectionView: some View {
-        VStack(spacing: 16) {
-            // Header
+        VStack(spacing: 20) {
             Text("SELECT MODEL")
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundColor(LauncherColors.secondaryText)
-                .tracking(2)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(.warmPinkMuted)
+                .tracking(3)
 
-            // Model list
-            VStack(spacing: 4) {
+            VStack(spacing: 2) {
                 ForEach(Array(models.enumerated()), id: \.element.id) { index, model in
                     ModelRow(
                         model: model,
@@ -112,14 +114,13 @@ struct LauncherTUIView: View {
                     }
                 }
             }
-            .frame(maxWidth: 380)
+            .frame(maxWidth: 340)
 
-            Spacer().frame(height: 16)
-
-            // Help
-            VStack(spacing: 2) {
-                Text("\(modelShortcutHint)  •  [↑↓] navigate  •  [Enter] confirm")
-                Text("[C] custom command  •  [E] edit models")
+            HStack(spacing: 16) {
+                Text("\(modelShortcutHint)")
+                Text("↑↓ navigate")
+                Text("C custom")
+                Text("E edit")
             }
             .font(.system(size: 10, design: .monospaced))
             .foregroundColor(LauncherColors.tertiaryText)
@@ -129,24 +130,17 @@ struct LauncherTUIView: View {
     // MARK: - Mode Selection View
 
     private func modeSelectionView(for model: ModelConfig) -> some View {
-        VStack(spacing: 16) {
-            // Header with model name
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(model.color)
-                    .frame(width: 10, height: 10)
-                Text(model.name.uppercased())
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundColor(LauncherColors.primaryText)
-            }
+        VStack(spacing: 20) {
+            Text(model.name.uppercased())
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(.warmPink)
+                .tracking(3)
 
-            // Mode options
-            VStack(spacing: 6) {
+            VStack(spacing: 2) {
                 ModeRow(
                     shortcut: "N",
                     title: "New Session",
                     command: model.newCommand,
-                    color: .green,
                     isSelected: selectedIndex == 0
                 )
                 .onTapGesture {
@@ -159,7 +153,6 @@ struct LauncherTUIView: View {
                         shortcut: "R",
                         title: "Resume",
                         command: model.resumeCommand,
-                        color: .blue,
                         isSelected: selectedIndex == 1
                     )
                     .onTapGesture {
@@ -168,48 +161,54 @@ struct LauncherTUIView: View {
                     }
                 }
             }
-            .frame(maxWidth: 380)
+            .frame(maxWidth: 340)
 
-            Spacer().frame(height: 16)
-
-            // Help
-            Text("[N] new  •  [R] resume  •  [Esc] back")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(LauncherColors.tertiaryText)
+            HStack(spacing: 16) {
+                Text("N new")
+                Text("R resume")
+                Text("Esc back")
+            }
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundColor(LauncherColors.tertiaryText)
         }
     }
 
     // MARK: - Custom Command View
 
     private var customCommandView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 20) {
             Text("CUSTOM COMMAND")
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundColor(LauncherColors.secondaryText)
-                .tracking(2)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(.warmPinkMuted)
+                .tracking(3)
 
             HStack(spacing: 8) {
                 Text(">")
-                    .font(.system(size: 16, weight: .bold, design: .monospaced))
-                    .foregroundColor(.green)
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundColor(.warmPink)
 
                 TextField("", text: $customCommand)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 14, design: .monospaced))
+                    .font(.system(size: 13, design: .monospaced))
                     .foregroundColor(LauncherColors.primaryText)
-                    .frame(maxWidth: 300)
+                    .frame(maxWidth: 280)
                     .onSubmit {
                         launchCustom()
                     }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(LauncherColors.inputBackground)
-            .cornerRadius(6)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(LauncherColors.inputBackground)
+            )
 
-            Text("[Enter] run  •  [Esc] back")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(LauncherColors.tertiaryText)
+            HStack(spacing: 16) {
+                Text("Enter run")
+                Text("Esc back")
+            }
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundColor(LauncherColors.tertiaryText)
         }
     }
 
@@ -221,7 +220,7 @@ struct LauncherTUIView: View {
 
         // If it's shell (empty commands), launch directly
         if model.newCommand.isEmpty && model.resumeCommand.isEmpty {
-            session.launch(command: "")
+            session.launch(command: "", modelId: model.id, modelName: model.name, kind: .shell)
             return
         }
 
@@ -232,19 +231,61 @@ struct LauncherTUIView: View {
 
     private func launchNew() {
         if case .selectMode(let model) = state {
-            session.launch(command: model.newCommand)
+            session.launch(command: model.newCommand, modelId: model.id, modelName: model.name, kind: .newSession)
         }
     }
 
     private func launchResume() {
         if case .selectMode(let model) = state {
-            session.launch(command: model.resumeCommand)
+            session.launch(command: model.resumeCommand, modelId: model.id, modelName: model.name, kind: .resume)
         }
     }
 
     private func launchCustom() {
         guard !customCommand.isEmpty else { return }
-        session.launch(command: customCommand)
+        session.launch(command: customCommand, kind: .custom)
+    }
+
+    private func restoreSessionDefaultsIfNeeded() {
+        guard !didRestoreSelection else { return }
+        guard !session.hasLaunchedCommand else { return }
+
+        if session.lastLaunchKind == .custom, let lastCommand = session.lastLaunchCommand, !lastCommand.isEmpty {
+            customCommand = lastCommand
+            state = .customCommand
+            didRestoreSelection = true
+            return
+        }
+
+        guard let model = modelForSession() else { return }
+
+        if model.newCommand.isEmpty && model.resumeCommand.isEmpty {
+            if let index = models.firstIndex(where: { $0.id == model.id }) {
+                selectedIndex = index
+            }
+            state = .selectModel
+            didRestoreSelection = true
+            return
+        }
+
+        state = .selectMode(model)
+        if session.lastLaunchKind == .resume, !model.resumeCommand.isEmpty {
+            selectedIndex = 1
+        } else {
+            selectedIndex = 0
+        }
+        didRestoreSelection = true
+    }
+
+    private func modelForSession() -> ModelConfig? {
+        if let modelId = session.lastModelId,
+           let match = models.first(where: { $0.id == modelId }) {
+            return match
+        }
+        if let modelName = session.lastModelName {
+            return models.first { $0.name == modelName }
+        }
+        return nil
     }
 }
 
@@ -255,38 +296,25 @@ struct ModelRow: View {
     let isSelected: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text("[\(model.shortcut)]")
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                .foregroundColor(model.color)
-                .frame(width: 28)
-
-            Circle()
-                .fill(model.color)
-                .frame(width: 8, height: 8)
+        HStack(spacing: 10) {
+            Text(model.shortcut)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(isSelected ? .warmPink : LauncherColors.tertiaryText)
+                .frame(width: 16)
 
             Text(model.name)
-                .font(.system(size: 14, weight: .medium, design: .monospaced))
-                .foregroundColor(LauncherColors.primaryText)
+                .font(.system(size: 13, weight: isSelected ? .medium : .regular, design: .monospaced))
+                .foregroundColor(isSelected ? .warmPink : LauncherColors.secondaryText)
 
             Spacer()
-
-            if isSelected {
-                Text("◀")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundColor(model.color)
-            }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isSelected ? LauncherColors.selectedRowBackground : Color.clear)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(isSelected ? model.color.opacity(0.5) : Color.clear, lineWidth: 1)
-                )
         )
+        .opacity(isSelected ? 1 : 0.7)
     }
 }
 
@@ -296,44 +324,34 @@ struct ModeRow: View {
     let shortcut: String
     let title: String
     let command: String
-    let color: Color
     let isSelected: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text("[\(shortcut)]")
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                .foregroundColor(color)
-                .frame(width: 28)
+        HStack(spacing: 10) {
+            Text(shortcut)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(isSelected ? .warmPink : LauncherColors.tertiaryText)
+                .frame(width: 16)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
-                    .foregroundColor(LauncherColors.primaryText)
+                    .font(.system(size: 13, weight: isSelected ? .medium : .regular, design: .monospaced))
+                    .foregroundColor(isSelected ? .warmPink : LauncherColors.secondaryText)
 
                 Text(command)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(LauncherColors.secondaryText)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(LauncherColors.tertiaryText)
             }
 
             Spacer()
-
-            if isSelected {
-                Text("◀")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundColor(color)
-            }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isSelected ? LauncherColors.selectedRowBackground : Color.clear)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(isSelected ? color.opacity(0.5) : Color.clear, lineWidth: 1)
-                )
         )
+        .opacity(isSelected ? 1 : 0.7)
     }
 }
 

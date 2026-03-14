@@ -29,6 +29,7 @@ struct Workspace: Codable, Identifiable, Equatable {
     var rootPath: String              // Primary folder path
     var customName: String?           // Optional custom name (if renamed)
     var additionalProjects: [Project] // Additional folders beyond root
+    var orchestratorEnabled: Bool
     var createdAt: Date
     var updatedAt: Date
 
@@ -44,13 +45,35 @@ struct Workspace: Codable, Identifiable, Equatable {
         return all
     }
 
-    init(id: UUID = UUID(), rootPath: String, customName: String? = nil, additionalProjects: [Project] = []) {
+    init(id: UUID = UUID(), rootPath: String, customName: String? = nil, additionalProjects: [Project] = [], orchestratorEnabled: Bool = false) {
         self.id = id
         self.rootPath = rootPath
         self.customName = customName
         self.additionalProjects = additionalProjects
+        self.orchestratorEnabled = orchestratorEnabled
         self.createdAt = Date()
         self.updatedAt = Date()
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case rootPath
+        case customName
+        case additionalProjects
+        case orchestratorEnabled
+        case createdAt
+        case updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        rootPath = try container.decode(String.self, forKey: .rootPath)
+        customName = try container.decodeIfPresent(String.self, forKey: .customName)
+        additionalProjects = try container.decodeIfPresent([Project].self, forKey: .additionalProjects) ?? []
+        orchestratorEnabled = try container.decodeIfPresent(Bool.self, forKey: .orchestratorEnabled) ?? false
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }
 
     /// Add a project to the workspace

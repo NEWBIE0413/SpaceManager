@@ -10,6 +10,7 @@ class WorkspaceStorage: ObservableObject {
 
     @Published var workspaces: [Workspace] = []
     @Published var modelConfigs: [ModelConfig] = []
+    @Published var agentStates: [WorkspaceAgentState] = []
 
     /// Base directory for storage
     private var storageDirectory: URL {
@@ -33,6 +34,11 @@ class WorkspaceStorage: ObservableObject {
         storageDirectory.appendingPathComponent("models.json")
     }
 
+    /// Path to agent state file
+    private var agentStatesFile: URL {
+        storageDirectory.appendingPathComponent("agent-states.json")
+    }
+
     private init() {
         encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -44,6 +50,7 @@ class WorkspaceStorage: ObservableObject {
         ensureStorageDirectoryExists()
         loadWorkspaces()
         loadModelConfigs()
+        loadAgentStates()
     }
 
     private func ensureStorageDirectoryExists() {
@@ -101,6 +108,18 @@ class WorkspaceStorage: ObservableObject {
     /// Delete a workspace
     func deleteWorkspace(_ workspace: Workspace) {
         workspaces.removeAll { $0.id == workspace.id }
+        saveWorkspaces()
+    }
+
+    /// Move a workspace to a new position
+    func moveWorkspace(from sourceIndex: Int, to destinationIndex: Int) {
+        guard sourceIndex != destinationIndex else { return }
+        guard sourceIndex >= 0, sourceIndex < workspaces.count else { return }
+        guard destinationIndex >= 0, destinationIndex <= workspaces.count else { return }
+
+        var updated = workspaces
+        updated.move(fromOffsets: IndexSet(integer: sourceIndex), toOffset: destinationIndex)
+        workspaces = updated
         saveWorkspaces()
     }
 
@@ -187,5 +206,47 @@ class WorkspaceStorage: ObservableObject {
     func resetModelConfigs() {
         modelConfigs = ModelConfig.defaults
         saveModelConfigs()
+    }
+
+    // MARK: - Agent States
+
+    /// Load agent states from disk
+    func loadAgentStates() {
+        guard fileManager.fileExists(atPath: agentStatesFile.path) else {
+            agentStates = []
+            return
+        }
+
+        do {
+            let data = try Data(contentsOf: agentStatesFile)
+            agentStates = try decoder.decode([WorkspaceAgentState].self, from: data)
+        } catch {
+            print("Error loading agent states: \(error)")
+            agentStates = []
+        }
+    }
+
+    /// Save agent states to disk
+    func saveAgentStates() {
+        do {
+            let data = try encoder.encode(agentStates)
+            try data.write(to: agentStatesFile)
+        } catch {
+            print("Error saving agent states: \(error)")
+        }
+    }
+
+    func updateAgentState(_ state: WorkspaceAgentState) {
+        if let index = agentStates.firstIndex(where: { $0.workspaceId == state.workspaceId }) {
+            agentStates[index] = state
+        } else {
+            agentStates.append(state)
+        }
+        saveAgentStates()
+    }
+
+    func removeAgentState(for workspaceId: UUID) {
+        agentStates.removeAll { $0.workspaceId == workspaceId }
+        saveAgentStates()
     }
 }

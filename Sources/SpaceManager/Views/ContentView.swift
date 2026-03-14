@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Main content view with two-pane layout
 struct ContentView: View {
@@ -35,6 +36,20 @@ struct ContentView: View {
                 }
                 .help("Settings")
             }
+        }
+        .onAppear {
+            updateWindowTitle()
+        }
+        .onChange(of: appState.selectedWorkspace?.name) {
+            updateWindowTitle()
+        }
+    }
+
+    private func updateWindowTitle() {
+        let title = appState.selectedWorkspace?.name ?? "SpaceManager"
+        DispatchQueue.main.async {
+            let window = NSApp.keyWindow ?? NSApp.windows.first
+            window?.title = title
         }
     }
 }

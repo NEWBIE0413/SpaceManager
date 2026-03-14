@@ -47,5 +47,9 @@ struct SessionTerminalWrapper: NSViewRepresentable {
     func updateNSView(_ nsView: ManagedTerminalView, context: Context) {
         nsView.sessionId = session.id
         nsView.setHoverFocusEnabled(focusMode == .hover)
+        nsView.setSelectionActive(isSelected)
+        if isSelected {
+            session.focusTerminal()
+        }
     }
 }

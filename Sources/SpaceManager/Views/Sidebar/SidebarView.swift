@@ -16,19 +16,6 @@ struct SidebarView: View {
             ProjectListView()
 
             Spacer()
-
-            // Add project button
-            if appState.selectedWorkspace != nil {
-                Button {
-                    appState.showAddProjectSheet = true
-                } label: {
-                    Label("Add Folder", systemImage: "plus.circle")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal)
-                .padding(.bottom, 8)
-            }
         }
         .frame(maxHeight: .infinity)
     }

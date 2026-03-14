@@ -7,13 +7,14 @@ struct TerminalAreaView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if appState.agentGroupCount > 1 {
+                AgentGroupTabBar()
+            }
             // Agent tab bar
             AgentTabBar()
 
-            Divider()
-
             // Terminal content - auto-split when multiple agents
-            if appState.agentSessions.count > 1 {
+            if appState.activeAgentSessions.count > 1 {
                 SplitTerminalView()
             } else {
                 SingleTerminalView()
@@ -64,20 +65,21 @@ struct SplitTerminalView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let sessionCount = CGFloat(appState.agentSessions.count)
-            let dividerCount = CGFloat(max(0, appState.agentSessions.count - 1))
+            let sessions = appState.activeAgentSessions
+            let sessionCount = CGFloat(sessions.count)
+            let dividerCount = CGFloat(max(0, sessions.count - 1))
             let dividerWidth: CGFloat = 1
             let sessionWidth = (geometry.size.width - dividerCount * dividerWidth) / sessionCount
 
             HStack(spacing: 0) {
-                ForEach(Array(appState.agentSessions.enumerated()), id: \.element.id) { index, session in
+                ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
                     SplitSessionView(
                         session: session,
                         width: sessionWidth
                     )
 
                     // Add divider between sessions (not after last one)
-                    if index < appState.agentSessions.count - 1 {
+                    if index < sessions.count - 1 {
                         Rectangle()
                             .fill(Color(nsColor: .separatorColor))
                             .frame(width: dividerWidth)
@@ -101,17 +103,30 @@ struct SplitSessionView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Mini header
-            HStack {
+            HStack(spacing: 8) {
                 Circle()
                     .fill(session.isRunning ? Color.green : Color.gray)
                     .frame(width: 6, height: 6)
-                Text(session.name)
-                    .font(.caption)
-                    .fontWeight(.medium)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(session.displayName)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+
+                    if let title = session.sessionTitle,
+                       !title.isEmpty,
+                       title != session.displayName {
+                        Text(title)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                }
                 Spacer()
 
                 // Close button
-                if appState.agentSessions.count > 1 {
+                if appState.activeAgentSessions.count > 1 {
                     Button {
                         appState.removeAgentSession(session)
                     } label: {
@@ -130,10 +145,7 @@ struct SplitSessionView: View {
             SessionContentView(session: session)
         }
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
-        )
+        .opacity(isSelected ? 1 : 0.7)
         .frame(width: width)
         .onTapGesture {
             appState.selectAgentSession(session)
@@ -143,5 +155,39 @@ struct SplitSessionView: View {
                 appState.selectAgentSession(session)
             }
         }
+    }
+}
+
+/// Top-level group tabs for agent blocks
+struct AgentGroupTabBar: View {
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(0..<appState.agentGroupCount, id: \.self) { index in
+                    Button {
+                        appState.selectAgentGroup(index: index)
+                    } label: {
+                        Text("Group \(index + 1)")
+                            .font(.system(size: 11, weight: appState.selectedAgentGroupIndex == index ? .semibold : .regular))
+                            .foregroundColor(appState.selectedAgentGroupIndex == index ? .primary : .secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(appState.selectedAgentGroupIndex == index
+                                          ? Color(nsColor: .controlBackgroundColor)
+                                          : Color(nsColor: .windowBackgroundColor))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+        }
+        .frame(height: 28)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
