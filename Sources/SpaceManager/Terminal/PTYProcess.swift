@@ -55,6 +55,9 @@ final class PTYProcess {
         pid = child
         isRunning = true
 
+        // exit 시점에 남은 출력을 논블로킹으로 드레인하기 위해 필요.
+        _ = fcntl(master, F_SETFL, O_NONBLOCK)
+
         let readSource = DispatchSource.makeReadSource(fileDescriptor: master, queue: ioQueue)
         readSource.setEventHandler { [weak self] in
             guard let self else { return }
@@ -62,9 +65,19 @@ final class PTYProcess {
             let n = read(self.masterFD, &buffer, buffer.count)
             if n > 0 {
                 self.onOutput?(Data(bytes: buffer, count: n))
+            } else if n < 0 && errno == EAGAIN {
+                // 논블로킹 fd라 지금은 읽을 데이터가 없을 뿐, 소스는 다시 깨어난다.
+                return
             } else {
                 self.readSource?.cancel()
             }
+        }
+        // fd는 오직 이 cancel handler에서만, 그리고 정확히 한 번만 닫는다.
+        // deinit/terminate는 절대 fd를 직접 close하지 않는다 — cancel()은 비동기라
+        // 취소 완료 전에 fd를 닫으면 모니터링 중인 fd를 닫는 UB가 된다.
+        // self가 아닌 master 값을 캡처해 self dealloc 이후에도 안전하게 동작한다.
+        readSource.setCancelHandler { [master] in
+            close(master)
         }
         readSource.resume()
         self.readSource = readSource
@@ -73,15 +86,34 @@ final class PTYProcess {
         exitSource.setEventHandler { [weak self] in
             guard let self else { return }
             var status: Int32 = 0
-            waitpid(self.pid, &status, WNOHANG)
-            let code: Int32 = (status & 0x7f) == 0 ? (status >> 8) & 0xff : -1
-            self.isRunning = false
+            let waited = waitpid(self.pid, &status, WNOHANG)
+            let code: Int32
+            if waited == self.pid {
+                code = (status & 0x7f) == 0 ? (status >> 8) & 0xff : -1
+            } else {
+                code = -1
+            }
+            // readSource를 취소하기 전에 커널 버퍼에 남은 출력을 모두 비운다 —
+            // 그렇지 않으면 child 종료 직전에 쓰인 마지막 출력이 유실될 수 있다.
+            self.drainRemainingOutput()
             self.readSource?.cancel()
             self.exitSource?.cancel()
+            self.isRunning = false
             self.onExit?(code)
         }
         exitSource.resume()
         self.exitSource = exitSource
+    }
+
+    /// 논블로킹 마스터 fd에서 더 읽을 데이터가 없을 때까지(<= 0) 반복해서 읽어
+    /// onOutput으로 전달한다. exit 처리 중 readSource를 취소하기 직전에만 호출한다.
+    private func drainRemainingOutput() {
+        var buffer = [UInt8](repeating: 0, count: 65536)
+        while true {
+            let n = read(masterFD, &buffer, buffer.count)
+            guard n > 0 else { break }
+            onOutput?(Data(bytes: buffer, count: n))
+        }
     }
 
     func write(_ data: Data) {
@@ -109,9 +141,9 @@ final class PTYProcess {
     }
 
     deinit {
+        // fd는 readSource의 cancel handler가 닫는다 — 여기서 직접 close하지 않는다.
+        if pid > 0, isRunning { kill(pid, SIGHUP) }
         readSource?.cancel()
         exitSource?.cancel()
-        if masterFD >= 0 { close(masterFD) }
-        if pid > 0, isRunning { kill(pid, SIGHUP) }
     }
 }

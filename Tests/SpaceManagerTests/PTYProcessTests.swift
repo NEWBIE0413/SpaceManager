@@ -8,13 +8,17 @@ final class PTYProcessTests: XCTestCase {
         gotOutput.assertForOverFulfill = false
         let exited = expectation(description: "exit")
         var collected = Data()
+        var exitCode: Int32 = -999
         let lock = NSLock()
 
         pty.onOutput = { data in
             lock.lock(); collected.append(data); lock.unlock()
             gotOutput.fulfill()
         }
-        pty.onExit = { _ in exited.fulfill() }
+        pty.onExit = { code in
+            exitCode = code
+            exited.fulfill()
+        }
 
         try pty.start(
             executable: "/bin/echo", execName: "echo", arguments: ["hello-pty"],
@@ -26,6 +30,7 @@ final class PTYProcessTests: XCTestCase {
         let text = String(data: collected, encoding: .utf8) ?? ""
         lock.unlock()
         XCTAssertTrue(text.contains("hello-pty"))
+        XCTAssertEqual(exitCode, 0)
     }
 
     func testWriteReachesChildProcess() throws {
