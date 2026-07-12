@@ -9,6 +9,9 @@ final class TerminalWebView: NSView {
     var onReady: (() -> Void)?
     var onWebProcessCrash: (() -> Void)?
 
+    private(set) var lastCols: UInt16 = 80
+    private(set) var lastRows: UInt16 = 24
+
     private let webView: WKWebView
     private var isReady = false
     private var pendingOutput = Data()
@@ -155,6 +158,8 @@ final class TerminalWebView: NSView {
         case "resize":
             if let p = dict["payload"] as? [String: Any],
                let cols = p["cols"] as? Int, let rows = p["rows"] as? Int {
+                lastCols = UInt16(cols)
+                lastRows = UInt16(rows)
                 onResize?(UInt16(cols), UInt16(rows))
             }
         default:

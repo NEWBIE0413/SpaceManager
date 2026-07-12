@@ -6,9 +6,6 @@ let package = Package(
     platforms: [
         .macOS(.v14)
     ],
-    dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0")
-    ],
     targets: [
         .target(
             name: "CPty",
@@ -17,7 +14,6 @@ let package = Package(
         .executableTarget(
             name: "SpaceManager",
             dependencies: [
-                .product(name: "SwiftTerm", package: "SwiftTerm"),
                 "CPty"
             ],
             path: "Sources/SpaceManager",

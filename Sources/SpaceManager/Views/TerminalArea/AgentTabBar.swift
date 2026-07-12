@@ -4,17 +4,17 @@ import UniformTypeIdentifiers
 /// Tab bar for switching between agent sessions
 struct AgentTabBar: View {
     @EnvironmentObject var appState: AppState
-    @State private var draggingSession: AgentSession?
+    @State private var draggingSession: TerminalSession?
 
     var body: some View {
         HStack(spacing: 0) {
             // Agent tabs
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 2) {
-                    ForEach(appState.agentSessions) { session in
+                    ForEach(appState.sessions) { session in
                         AgentTab(
                             session: session,
-                            isSelected: appState.selectedAgentSession?.id == session.id
+                            isSelected: appState.selectedSession?.id == session.id
                         )
                         .onDrag {
                             draggingSession = session
@@ -24,11 +24,11 @@ struct AgentTabBar: View {
                             of: [UTType.text],
                             delegate: AgentTabDropDelegate(
                                 target: session,
-                                sessions: $appState.agentSessions,
+                                sessions: $appState.sessions,
                                 dragging: $draggingSession
                             ) { source, destination in
                                 withAnimation(.easeInOut(duration: 0.15)) {
-                                    appState.moveAgentSession(from: source, to: destination)
+                                    appState.moveSession(from: source, to: destination)
                                 }
                             }
                         )
@@ -41,7 +41,7 @@ struct AgentTabBar: View {
 
             // Add agent button
             Button {
-                appState.addAgentSession()
+                appState.addShellTab()
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 14, weight: .medium))
@@ -57,9 +57,9 @@ struct AgentTabBar: View {
 }
 
 private struct AgentTabDropDelegate: DropDelegate {
-    let target: AgentSession
-    @Binding var sessions: [AgentSession]
-    @Binding var dragging: AgentSession?
+    let target: TerminalSession
+    @Binding var sessions: [TerminalSession]
+    @Binding var dragging: TerminalSession?
     let moveAction: (_ source: Int, _ destination: Int) -> Void
 
     func dropEntered(info: DropInfo) {
@@ -84,7 +84,7 @@ private struct AgentTabDropDelegate: DropDelegate {
 /// Single agent tab
 struct AgentTab: View {
     @EnvironmentObject var appState: AppState
-    let session: AgentSession
+    let session: TerminalSession
     let isSelected: Bool
 
     @State private var isHovering = false
@@ -107,7 +107,7 @@ struct AgentTab: View {
                 .fill(dotColor)
                 .frame(width: 6, height: 6)
 
-            Text(session.displayName)
+            Text(session.name)
                 .font(.system(size: 13, weight: isSelected ? .medium : .regular))
                 .foregroundColor(textColor)
                 .lineLimit(1)
@@ -115,7 +115,7 @@ struct AgentTab: View {
             if isHovering || isSelected {
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
-                        appState.removeAgentSession(session)
+                        appState.removeSession(session)
                     }
                 } label: {
                     Image(systemName: "xmark")
@@ -147,7 +147,7 @@ struct AgentTab: View {
         }
         .onTapGesture {
             withAnimation(.easeInOut(duration: 0.2)) {
-                appState.selectAgentSession(session)
+                appState.selectSession(session)
             }
         }
     }

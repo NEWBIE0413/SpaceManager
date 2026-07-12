@@ -18,7 +18,7 @@ struct SingleTerminalView: View {
     @EnvironmentObject var appState: AppState
 
     var body: some View {
-        if let session = appState.selectedAgentSession {
+        if let session = appState.selectedSession {
             SessionContentView(session: session)
                 .id(session.id)
         } else {
@@ -26,7 +26,7 @@ struct SingleTerminalView: View {
                 Text("No terminal")
                     .foregroundColor(.secondary)
                 Button("New Terminal") {
-                    appState.addAgentSession()
+                    appState.addShellTab()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -35,7 +35,7 @@ struct SingleTerminalView: View {
 }
 
 struct SessionContentView: View {
-    @ObservedObject var session: AgentSession
+    @ObservedObject var session: TerminalSession
 
     var body: some View {
         AgentTerminalView(session: session)

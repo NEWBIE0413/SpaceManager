@@ -9,10 +9,10 @@ class AppState: ObservableObject {
     @Published var selectedWorkspace: Workspace?
     @Published var selectedProject: Project?
 
-    @Published var agentSessions: [AgentSession] = []
-    @Published var selectedAgentSession: AgentSession?
-    private var agentSessionsByWorkspace: [UUID: [AgentSession]] = [:]
-    private var selectedAgentIdByWorkspace: [UUID: UUID] = [:]
+    @Published var sessions: [TerminalSession] = []
+    @Published var selectedSession: TerminalSession?
+    private var sessionsByWorkspace: [UUID: [TerminalSession]] = [:]
+    private var selectedSessionIdByWorkspace: [UUID: UUID] = [:]
 
     @Published var showNewWorkspaceSheet = false
     @Published var showAddProjectSheet = false
@@ -22,11 +22,6 @@ class AppState: ObservableObject {
     init() {
         storage.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
-
-        NotificationCenter.default.publisher(for: .agentSelectionRequested)
-            .compactMap { $0.userInfo?["id"] as? UUID }
-            .sink { [weak self] sessionId in self?.selectAgentSession(id: sessionId) }
             .store(in: &cancellables)
 
         if let first = storage.workspaces.first {
@@ -53,27 +48,27 @@ class AppState: ObservableObject {
 
     func deleteWorkspace(_ workspace: Workspace) {
         storage.deleteWorkspace(workspace)
-        if let sessions = agentSessionsByWorkspace[workspace.id] {
+        if let sessions = sessionsByWorkspace[workspace.id] {
             for session in sessions { session.cleanup() }
         }
-        agentSessionsByWorkspace[workspace.id] = nil
-        selectedAgentIdByWorkspace[workspace.id] = nil
+        sessionsByWorkspace[workspace.id] = nil
+        selectedSessionIdByWorkspace[workspace.id] = nil
         if selectedWorkspace?.id == workspace.id {
             if let next = storage.workspaces.first {
                 selectWorkspace(next)
             } else {
                 selectedWorkspace = nil
                 selectedProject = nil
-                agentSessions = []
-                selectedAgentSession = nil
+                sessions = []
+                selectedSession = nil
             }
         }
     }
 
     func selectWorkspace(_ workspace: Workspace) {
         if let current = selectedWorkspace {
-            agentSessionsByWorkspace[current.id] = agentSessions
-            selectedAgentIdByWorkspace[current.id] = selectedAgentSession?.id
+            sessionsByWorkspace[current.id] = sessions
+            selectedSessionIdByWorkspace[current.id] = selectedSession?.id
         }
         selectedWorkspace = workspace
         selectedProject = Project(path: workspace.rootPath, name: workspace.name)
@@ -105,84 +100,127 @@ class AppState: ObservableObject {
 
     // MARK: - Terminal Sessions
 
-    func addAgentSession() {
+    /// 순수 셸 탭 (Cmd+T)
+    func addShellTab() {
         guard let workspace = selectedWorkspace else { return }
-        let session = AgentSession(
-            name: "Terminal \(agentSessions.count + 1)",
+        let session = TerminalSession(
+            kind: .shell,
+            name: "zsh",
             workingDirectory: workspace.rootPath
         )
-        agentSessions.append(session)
-        agentSessionsByWorkspace[workspace.id] = agentSessions
-        selectAgentSession(session)
+        appendAndSelect(session, in: workspace)
     }
 
-    func removeAgentSession(_ session: AgentSession) {
+    /// 추가 tmux 탭 — <세션명>-2, -3, … 자동 넘버링
+    func addTmuxTab() {
+        guard let workspace = selectedWorkspace else { return }
+        let base = workspace.effectiveTmuxSessionName
+        let used = Set(sessions.compactMap { $0.tmuxSessionName })
+        var n = 2
+        while used.contains("\(base)-\(n)") { n += 1 }
+        let sessionName = "\(base)-\(n)"
+        let session = TerminalSession(
+            kind: .tmuxExtra,
+            name: sessionName,
+            workingDirectory: workspace.rootPath,
+            tmuxSessionName: sessionName
+        )
+        appendAndSelect(session, in: workspace)
+    }
+
+    private func makeMainTab(for workspace: Workspace) -> TerminalSession {
+        // tmux가 없으면 메인 탭도 순수 셸로 폴백 (배너는 TerminalAreaView가 표시)
+        guard TmuxBootstrap.isTmuxAvailable else {
+            return TerminalSession(kind: .shell, name: "zsh", workingDirectory: workspace.rootPath)
+        }
+        let sessionName = workspace.effectiveTmuxSessionName
+        return TerminalSession(
+            kind: .tmuxMain,
+            name: sessionName,
+            workingDirectory: workspace.rootPath,
+            tmuxSessionName: sessionName
+        )
+    }
+
+    private func appendAndSelect(_ session: TerminalSession, in workspace: Workspace) {
+        sessions.append(session)
+        sessionsByWorkspace[workspace.id] = sessions
+        selectSession(session)
+    }
+
+    func removeSession(_ session: TerminalSession) {
         session.cleanup()
-        agentSessions.removeAll { $0.id == session.id }
+        sessions.removeAll { $0.id == session.id }
         if let workspace = selectedWorkspace {
-            agentSessionsByWorkspace[workspace.id] = agentSessions
+            sessionsByWorkspace[workspace.id] = sessions
         }
-        if selectedAgentSession?.id == session.id {
-            selectedAgentSession = agentSessions.first
+        if selectedSession?.id == session.id {
+            selectedSession = sessions.first
         }
     }
 
-    func selectAgentSession(_ session: AgentSession) {
-        guard selectedAgentSession?.id != session.id else {
+    func selectSession(_ session: TerminalSession) {
+        guard selectedSession?.id != session.id else {
             session.focusTerminal()
             return
         }
-        selectedAgentSession = session
+        selectedSession = session
         if let workspace = selectedWorkspace {
-            selectedAgentIdByWorkspace[workspace.id] = session.id
+            selectedSessionIdByWorkspace[workspace.id] = session.id
         }
+        session.restartIfDead()
         session.focusTerminal()
     }
 
-    func selectAgentSession(id: UUID) {
-        guard let session = agentSessions.first(where: { $0.id == id }) else { return }
-        selectAgentSession(session)
+    func selectSession(id: UUID) {
+        guard let session = sessions.first(where: { $0.id == id }) else { return }
+        selectSession(session)
     }
 
-    func moveAgentSession(from sourceIndex: Int, to destinationIndex: Int) {
+    func moveSession(from sourceIndex: Int, to destinationIndex: Int) {
         guard sourceIndex != destinationIndex,
-              sourceIndex >= 0, sourceIndex < agentSessions.count,
-              destinationIndex >= 0, destinationIndex <= agentSessions.count else { return }
-        var sessions = agentSessions
-        sessions.move(fromOffsets: IndexSet(integer: sourceIndex), toOffset: destinationIndex)
-        agentSessions = sessions
+              sourceIndex >= 0, sourceIndex < sessions.count,
+              destinationIndex >= 0, destinationIndex <= sessions.count else { return }
+        var updated = sessions
+        updated.move(fromOffsets: IndexSet(integer: sourceIndex), toOffset: destinationIndex)
+        sessions = updated
         if let workspace = selectedWorkspace {
-            agentSessionsByWorkspace[workspace.id] = sessions
+            sessionsByWorkspace[workspace.id] = updated
         }
     }
 
-    func selectNextAgentSession() {
-        guard !agentSessions.isEmpty else { return }
-        guard let current = selectedAgentSession,
-              let index = agentSessions.firstIndex(where: { $0.id == current.id }) else {
-            selectAgentSession(agentSessions[0])
+    func selectNextSession() {
+        guard !sessions.isEmpty else { return }
+        guard let current = selectedSession,
+              let index = sessions.firstIndex(where: { $0.id == current.id }) else {
+            selectSession(sessions[0])
             return
         }
-        selectAgentSession(agentSessions[(index + 1) % agentSessions.count])
+        selectSession(sessions[(index + 1) % sessions.count])
     }
 
-    func selectPreviousAgentSession() {
-        guard !agentSessions.isEmpty else { return }
-        guard let current = selectedAgentSession,
-              let index = agentSessions.firstIndex(where: { $0.id == current.id }) else {
-            selectAgentSession(agentSessions[0])
+    func selectPreviousSession() {
+        guard !sessions.isEmpty else { return }
+        guard let current = selectedSession,
+              let index = sessions.firstIndex(where: { $0.id == current.id }) else {
+            selectSession(sessions[0])
             return
         }
-        selectAgentSession(agentSessions[(index - 1 + agentSessions.count) % agentSessions.count])
+        selectSession(sessions[(index - 1 + sessions.count) % sessions.count])
     }
 
     private func ensureSessions(for workspace: Workspace) {
-        agentSessions = agentSessionsByWorkspace[workspace.id] ?? []
-        if agentSessions.isEmpty {
-            addAgentSession()
-        } else {
-            let storedId = selectedAgentIdByWorkspace[workspace.id]
-            selectedAgentSession = agentSessions.first(where: { $0.id == storedId }) ?? agentSessions.first
+        sessions = sessionsByWorkspace[workspace.id] ?? []
+        // 메인 탭 보장: 닫혔거나 처음이면 재생성 → tmux 세션에 재attach (스펙 §5)
+        if !sessions.contains(where: { $0.kind == .tmuxMain }) && TmuxBootstrap.isTmuxAvailable {
+            let main = makeMainTab(for: workspace)
+            sessions.insert(main, at: 0)
         }
+        if sessions.isEmpty {
+            sessions = [makeMainTab(for: workspace)]
+        }
+        sessionsByWorkspace[workspace.id] = sessions
+        let storedId = selectedSessionIdByWorkspace[workspace.id]
+        selectedSession = sessions.first(where: { $0.id == storedId }) ?? sessions.first
     }
 }
