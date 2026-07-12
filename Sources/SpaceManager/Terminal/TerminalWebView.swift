@@ -27,14 +27,11 @@ final class TerminalWebView: NSView {
         config.userContentController.add(BridgeProxy(owner: self), name: "bridge")
         webView.navigationDelegate = navigationProxy
         webView.setValue(false, forKey: "drawsBackground")
-        webView.translatesAutoresizingMaskIntoConstraints = false
+        // AutoLayout 제약 대신 autoresizing: 로딩 중 재부모화를 겪는 WKWebView는
+        // 제약 기반 리사이즈에서 웹 프로세스 뷰포트가 스테일해지는 사례가 있다
+        webView.frame = bounds
+        webView.autoresizingMask = [.width, .height]
         addSubview(webView)
-        NSLayoutConstraint.activate([
-            webView.topAnchor.constraint(equalTo: topAnchor),
-            webView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            webView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: trailingAnchor),
-        ])
         loadPage()
     }
 
@@ -96,6 +93,15 @@ final class TerminalWebView: NSView {
         super.mouseDown(with: event)
     }
 
+    // 뷰가 0x0으로 부착됐다가 나중에 커지는 경우(호스트 컨테이너 경유) 페이지 쪽
+    // ResizeObserver가 초기 핏을 놓칠 수 있어, 네이티브 레이아웃 변경마다 명시적으로 핏한다
+    override func layout() {
+        super.layout()
+        if isReady {
+            webView.evaluateJavaScript("window.smFit && window.smFit()", completionHandler: nil)
+        }
+    }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         applyTheme()
@@ -147,9 +153,18 @@ final class TerminalWebView: NSView {
         guard let dict = body as? [String: Any], let type = dict["type"] as? String else { return }
         switch type {
         case "ready":
+            if let p = dict["payload"] as? [String: Any],
+               let cols = p["cols"] as? Int, let rows = p["rows"] as? Int, cols > 0, rows > 0 {
+                lastCols = UInt16(cols)
+                lastRows = UInt16(rows)
+            }
             isReady = true
             applyTheme()
             flushOutput()
+            webView.evaluateJavaScript("window.smFit && window.smFit()", completionHandler: nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.webView.evaluateJavaScript("window.smFit && window.smFit()", completionHandler: nil)
+            }
             onReady?()
         case "input":
             if let s = dict["payload"] as? String {

@@ -34,15 +34,16 @@
   term.loadAddon(fit);
   term.open(document.getElementById('terminal'));
   try { term.loadAddon(new WebglAddon.WebglAddon()); } catch (e) { /* webgl 불가 시 canvas 폴백 */ }
-  fit.fit();
 
   function post(type, payload) {
     window.webkit.messageHandlers.bridge.postMessage({ type: type, payload: payload === undefined ? null : payload });
   }
 
-  // 키입력·IME 조합 결과·마우스 리포트 전부 onData로 들어온다
+  // 리스너 등록은 반드시 첫 fit()보다 먼저 — 초기 핏의 리사이즈 이벤트가 유실되면
+  // PTY가 시작 크기(80x24)에 영원히 갇힌다
   term.onData(function (d) { post('input', d); });
   term.onResize(function (s) { post('resize', { cols: s.cols, rows: s.rows }); });
+  fit.fit();
 
   // Cmd+C/V/A는 네이티브(Swift)가 처리하므로 xterm이 삼키지 않게 통과시킨다
   term.attachCustomKeyEventHandler(function (e) {
@@ -165,6 +166,7 @@
   window.smGetSelection = function () { return term.getSelection(); };
   window.smSelectAll = function () { term.selectAll(); };
   window.smFocus = function () { term.focus(); };
+  window.smFit = function () { try { fit.fit(); } catch (e) {} };
   window.smSetTheme = function (theme) {
     term.options.theme = theme;
     document.documentElement.style.setProperty('--term-bg', theme.background);
