@@ -11,7 +11,7 @@ struct AgentTabBar: View {
             // Agent tabs
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 2) {
-                    ForEach(appState.activeAgentSessions) { session in
+                    ForEach(appState.agentSessions) { session in
                         AgentTab(
                             session: session,
                             isSelected: appState.selectedAgentSession?.id == session.id
@@ -49,7 +49,7 @@ struct AgentTabBar: View {
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 12)
-            .help("New Agent Tab (auto-splits)")
+            .help("New Terminal Tab")
         }
         .frame(height: 38)
         .background(Color(nsColor: .windowBackgroundColor))

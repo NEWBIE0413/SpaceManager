@@ -45,19 +45,19 @@ struct SpaceManagerApp: App {
                 }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
 
-                Button("New Agent Tab") {
+                Button("New Terminal Tab") {
                     appState.addAgentSession()
                 }
                 .keyboardShortcut("t", modifiers: .command)
             }
 
-            CommandMenu("Agents") {
-                Button("Previous Agent") {
+            CommandMenu("Tabs") {
+                Button("Previous Tab") {
                     appState.selectPreviousAgentSession()
                 }
                 .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
 
-                Button("Next Agent") {
+                Button("Next Tab") {
                     appState.selectNextAgentSession()
                 }
                 .keyboardShortcut(.rightArrow, modifiers: [.command, .option])

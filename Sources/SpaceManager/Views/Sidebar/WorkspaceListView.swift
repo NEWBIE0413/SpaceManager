@@ -42,11 +42,7 @@ struct WorkspaceListView: View {
                 ForEach(appState.storage.workspaces) { workspace in
                     WorkspaceRow(
                         workspace: workspace,
-                        isSelected: appState.selectedWorkspace?.id == workspace.id,
-                        isOrchestratorEnabled: workspace.orchestratorEnabled,
-                        onToggleOrchestrator: {
-                            appState.setOrchestratorEnabled(workspace, enabled: !workspace.orchestratorEnabled)
-                        }
+                        isSelected: appState.selectedWorkspace?.id == workspace.id
                     )
                     .onTapGesture {
                         appState.selectWorkspace(workspace)
@@ -116,8 +112,6 @@ private struct WorkspaceDropDelegate: DropDelegate {
 struct WorkspaceRow: View {
     let workspace: Workspace
     let isSelected: Bool
-    let isOrchestratorEnabled: Bool
-    let onToggleOrchestrator: () -> Void
     @State private var isHovering = false
 
     var body: some View {
@@ -143,15 +137,6 @@ struct WorkspaceRow: View {
             }
 
             Spacer()
-
-            Button(action: onToggleOrchestrator) {
-                Image(systemName: isOrchestratorEnabled ? "antenna.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(isOrchestratorEnabled ? .primary : .secondary)
-                    .frame(width: 18, height: 18)
-            }
-            .buttonStyle(.plain)
-            .help(isOrchestratorEnabled ? "Auto orchestration enabled" : "Auto orchestration disabled")
 
             if workspace.additionalProjects.count > 0 {
                 Text("\(workspace.additionalProjects.count)")

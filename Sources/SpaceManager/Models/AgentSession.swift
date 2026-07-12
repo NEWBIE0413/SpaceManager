@@ -331,10 +331,6 @@ final class ManagedTerminalView: NSView {
         if flags.contains(.command) {
             switch event.charactersIgnoringModifiers {
             case "c":
-                let sa = terminal.selection?.active ?? false
-                let txt = terminal.selection?.getSelectedText() ?? "(nil)"
-                let msg = "performKeyEquiv Cmd+C: sel.active=\(sa) text='\(txt.prefix(100))'\n"
-                try? msg.write(toFile: "/tmp/sm-debug.log", atomically: true, encoding: .utf8)
                 terminal.copy(self)
                 return true
             case "v":
