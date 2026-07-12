@@ -6,6 +6,16 @@ import AppKit
 struct ContentView: View {
     @StateObject private var appState = AppState()
     @Environment(\.openWindow) private var openWindow
+    @AppStorage("preferredAppearance") private var preferredAppearance = "system"
+
+    private var isDarkNow: Bool {
+        switch preferredAppearance {
+        case "light": return false
+        case "dark": return true
+        default:
+            return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        }
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -25,6 +35,17 @@ struct ContentView: View {
                 .environmentObject(appState)
         }
         .navigationTitle(appState.selectedWorkspace?.name ?? "SpaceManager")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    preferredAppearance = isDarkNow ? "light" : "dark"
+                    AppearanceManager.apply(preferredAppearance)
+                } label: {
+                    Image(systemName: isDarkNow ? "sun.max" : "moon")
+                }
+                .help(isDarkNow ? "라이트 모드로 전환" : "다크 모드로 전환")
+            }
+        }
         .onAppear {
             WindowRestorer.openRemainingWindowsIfNeeded(openWindow)
         }

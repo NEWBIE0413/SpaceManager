@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Right pane containing terminal tabs and the selected terminal
+/// Right pane containing the selected terminal.
+/// 탭 전환 UI는 사이드바의 워크스페이스 폴더링(WorkspaceTabRow)이 담당한다.
 struct TerminalAreaView: View {
     @EnvironmentObject var appState: AppState
 
@@ -19,7 +20,6 @@ struct TerminalAreaView: View {
                 .padding(.vertical, 6)
                 .background(Color.orange.opacity(0.1))
             }
-            AgentTabBar()
             SingleTerminalView()
         }
         .background(Color(nsColor: .controlBackgroundColor))

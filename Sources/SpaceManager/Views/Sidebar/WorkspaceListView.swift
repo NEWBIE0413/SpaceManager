@@ -42,7 +42,9 @@ struct WorkspaceListView: View {
                 ForEach(appState.storage.workspaces) { workspace in
                     WorkspaceRow(
                         workspace: workspace,
-                        isSelected: appState.selectedWorkspace?.id == workspace.id
+                        isSelected: appState.selectedWorkspace?.id == workspace.id,
+                        onAddShellTab: { appState.selectWorkspace(workspace); appState.addShellTab() },
+                        onAddTmuxTab: { appState.selectWorkspace(workspace); appState.addTmuxTab() }
                     )
                     .onTapGesture {
                         appState.selectWorkspace(workspace)
@@ -89,10 +91,70 @@ struct WorkspaceListView: View {
                             appState.deleteWorkspace(workspace)
                         }
                     }
+
+                    // 선택된 워크스페이스의 탭 폴더링 — 탭이 2개 이상일 때만 하위 목록 표시
+                    if appState.selectedWorkspace?.id == workspace.id && appState.sessions.count > 1 {
+                        ForEach(appState.sessions) { session in
+                            WorkspaceTabRow(
+                                session: session,
+                                isSelected: appState.selectedSession?.id == session.id,
+                                onSelect: { appState.selectSession(session) },
+                                onClose: { appState.removeSession(session) }
+                            )
+                        }
+                    }
                 }
                 .padding(.horizontal, 8)
             }
         }
+    }
+}
+
+/// 워크스페이스 하위 탭 행 (폴더링 목록의 항목)
+struct WorkspaceTabRow: View {
+    @ObservedObject var session: TerminalSession
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(session.isRunning
+                      ? Color.green.opacity(isSelected ? 1 : 0.5)
+                      : Color.gray.opacity(isSelected ? 1 : 0.5))
+                .frame(width: 5, height: 5)
+
+            Text(session.name)
+                .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                .foregroundColor(isSelected ? .warmPink : .primary.opacity(0.7))
+                .lineLimit(1)
+
+            Spacer()
+
+            if isHovering {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 14, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Close Tab")
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.leading, 32)
+        .padding(.trailing, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(isSelected ? Color.primary.opacity(0.06) : (isHovering ? Color.primary.opacity(0.03) : Color.clear))
+        )
+        .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
+        .onTapGesture(perform: onSelect)
     }
 }
 
@@ -126,6 +188,8 @@ private struct WorkspaceDropDelegate: DropDelegate {
 struct WorkspaceRow: View {
     let workspace: Workspace
     let isSelected: Bool
+    var onAddShellTab: (() -> Void)?
+    var onAddTmuxTab: (() -> Void)?
     @State private var isHovering = false
 
     var body: some View {
@@ -151,6 +215,24 @@ struct WorkspaceRow: View {
             }
 
             Spacer()
+
+            // 새 탭 메뉴 — 선택/호버 시 표시
+            if isSelected || isHovering {
+                Menu {
+                    Button("셸 탭") { onAddShellTab?() }
+                    if TmuxBootstrap.isTmuxAvailable {
+                        Button("tmux 탭") { onAddTmuxTab?() }
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: 20)
+                .help("New Tab")
+            }
 
             if workspace.additionalProjects.count > 0 {
                 Text("\(workspace.additionalProjects.count)")

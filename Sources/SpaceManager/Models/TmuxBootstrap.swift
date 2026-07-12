@@ -25,20 +25,25 @@ enum TmuxBootstrap {
         """
     }
 
-    /// 로그인 셸 PATH 기준 tmux 존재 여부 (homebrew 경로 포함). 첫 접근 시 1회 평가 후 캐시.
+    /// tmux 존재 여부. 첫 접근 시 1회 평가 후 캐시.
+    ///
+    /// 파일 시스템 검사만 사용한다 — 이전 구현(로그인 셸 스폰 + waitUntilExit)은
+    /// 메인 스레드에서 첫 평가될 때 waitUntilExit이 런루프를 재진입 펌핑해
+    /// SwiftUI가 같은 static let을 다시 터치 → dispatch_once 재귀 → 크래시했다.
+    /// 파일 검사는 즉시 반환이라 그 문제 클래스 자체가 없다.
     static let isTmuxAvailable: Bool = {
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-lc", "command -v tmux >/dev/null 2>&1"]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            return false
+        let candidates = [
+            "/opt/homebrew/bin/tmux",   // Apple Silicon homebrew
+            "/usr/local/bin/tmux",      // Intel homebrew
+            "/usr/bin/tmux",
+        ]
+        if candidates.contains(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            return true
+        }
+        // PATH 폴백 (GUI 앱의 PATH는 제한적이지만 위 후보가 대부분을 커버)
+        let path = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        return path.split(separator: ":").contains {
+            FileManager.default.isExecutableFile(atPath: "\($0)/tmux")
         }
     }()
 }
