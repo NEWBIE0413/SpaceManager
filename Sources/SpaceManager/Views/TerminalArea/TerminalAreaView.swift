@@ -31,6 +31,7 @@ struct SingleTerminalView: View {
     var body: some View {
         if let session = appState.selectedAgentSession {
             SessionContentView(session: session)
+                .id(session.id)
         } else {
             VStack {
                 Text("No agent session")
@@ -145,7 +146,6 @@ struct SplitSessionView: View {
             SessionContentView(session: session)
         }
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        .opacity(isSelected ? 1 : 0.7)
         .frame(width: width)
         .onTapGesture {
             appState.selectAgentSession(session)

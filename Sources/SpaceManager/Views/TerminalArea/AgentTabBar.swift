@@ -89,19 +89,29 @@ struct AgentTab: View {
 
     @State private var isHovering = false
 
+    private var dotColor: Color {
+        if isSelected {
+            return session.isRunning ? .green : .gray
+        }
+        return session.isRunning ? .green.opacity(0.4) : .gray.opacity(0.4)
+    }
+
+    private var textColor: Color {
+        if isSelected { return .warmPink }
+        return .primary.opacity(0.35)
+    }
+
     var body: some View {
         HStack(spacing: 8) {
-            // Status Dot
             Circle()
-                .fill(session.isRunning ? Color.green : Color.gray)
+                .fill(dotColor)
                 .frame(width: 6, height: 6)
 
             Text(session.displayName)
                 .font(.system(size: 13, weight: isSelected ? .medium : .regular))
-                .foregroundColor(isSelected ? .warmPink : .secondary)
+                .foregroundColor(textColor)
                 .lineLimit(1)
 
-            // Close Button
             if isHovering || isSelected {
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
@@ -128,7 +138,6 @@ struct AgentTab: View {
                       ? Color(nsColor: .controlBackgroundColor)
                       : Color(nsColor: .windowBackgroundColor).opacity(isHovering ? 0.5 : 0))
         )
-        .opacity(isSelected ? 1 : 0.6)
         .frame(height: 38)
         .contentShape(Rectangle())
         .onHover { hovering in

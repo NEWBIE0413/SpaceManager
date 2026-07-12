@@ -24,6 +24,10 @@ class AgentSession: Identifiable, ObservableObject, Equatable {
     private(set) var terminalView: ManagedTerminalView?
     private var terminalStarted = false
 
+    private var tmuxSessionName: String {
+        "sm-agent-\(id.uuidString.lowercased())"
+    }
+
     init(id: UUID = UUID(), name: String, workingDirectory: String) {
         self.id = id
         self.name = name
@@ -70,6 +74,31 @@ class AgentSession: Identifiable, ObservableObject, Equatable {
         return base.isEmpty ? tokenString : base
     }
 
+    private func buildTmuxBootstrapScript(shell: String, startDirectory: String) -> String {
+        let sessionName = tmuxSessionName.shQuoted
+        let startDirectoryArg = startDirectory.shQuoted
+        let attachCommand = "exec tmux attach-session -t \(sessionName)"
+
+        guard !launchCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return """
+            if tmux has-session -t \(sessionName) 2>/dev/null; then
+              \(attachCommand)
+            else
+              exec tmux new-session -s \(sessionName) -c \(startDirectoryArg)
+            fi
+            """
+        }
+
+        let initialCommand = "\(launchCommand)\nexec \(shell.shQuoted) -l".shQuoted
+        return """
+        if tmux has-session -t \(sessionName) 2>/dev/null; then
+          \(attachCommand)
+        else
+          exec tmux new-session -s \(sessionName) -c \(startDirectoryArg) \(initialCommand)
+        fi
+        """
+    }
+
     /// Get or create the terminal view for this session
     func getOrCreateTerminal() -> ManagedTerminalView {
         if let existing = terminalView {
@@ -99,7 +128,7 @@ class AgentSession: Identifiable, ObservableObject, Equatable {
         terminal.nativeForegroundColor = NSColor.textColor
         terminal.caretColor = NSColor.textBackgroundColor
         terminal.setCursorStyle(.steadyBar)
-        terminal.terminal.getTerminal().options.alternateBufferEnabled = false
+        terminal.terminal.allowMouseReporting = false
         terminal.terminal.processDelegate = self
 
         self.terminalView = terminal
@@ -111,11 +140,9 @@ class AgentSession: Identifiable, ObservableObject, Equatable {
         guard !terminalStarted, let terminal = terminalView else { return }
         terminalStarted = true
 
-        // Get user's shell
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let shellName = "-" + (shell as NSString).lastPathComponent
 
-        // Determine working directory
         let startDir: String
         if FileManager.default.fileExists(atPath: workingDirectory) {
             startDir = workingDirectory
@@ -123,22 +150,12 @@ class AgentSession: Identifiable, ObservableObject, Equatable {
             startDir = NSHomeDirectory()
         }
 
-        // Start shell
-        terminal.startProcess(executable: shell, execName: shellName)
-
-        // Change to working directory first, then run launch command
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            guard let self = self else { return }
-            // cd to working directory
-            self.terminalView?.send(txt: "cd \"\(startDir)\" && clear\n")
-
-            // Run launch command if set
-            if !self.launchCommand.isEmpty {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    self.terminalView?.send(txt: self.launchCommand + "\n")
-                }
-            }
-        }
+        terminal.startProcess(
+            executable: shell,
+            args: ["-lc", buildTmuxBootstrapScript(shell: shell, startDirectory: startDir)],
+            execName: shellName,
+            currentDirectory: startDir
+        )
     }
 
     /// Focus this terminal
@@ -274,8 +291,20 @@ final class ManagedTerminalView: NSView {
         terminal.applyCursorPreferences()
     }
 
-    func startProcess(executable: String, execName: String) {
-        terminal.startProcess(executable: executable, execName: execName)
+    func startProcess(
+        executable: String,
+        args: [String] = [],
+        environment: [String]? = nil,
+        execName: String,
+        currentDirectory: String? = nil
+    ) {
+        terminal.startProcess(
+            executable: executable,
+            args: args,
+            environment: environment,
+            execName: execName,
+            currentDirectory: currentDirectory
+        )
     }
 
     func send(txt: String) {
@@ -298,7 +327,27 @@ final class ManagedTerminalView: NSView {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        terminal.performKeyEquivalent(with: event)
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.command) {
+            switch event.charactersIgnoringModifiers {
+            case "c":
+                let sa = terminal.selection?.active ?? false
+                let txt = terminal.selection?.getSelectedText() ?? "(nil)"
+                let msg = "performKeyEquiv Cmd+C: sel.active=\(sa) text='\(txt.prefix(100))'\n"
+                try? msg.write(toFile: "/tmp/sm-debug.log", atomically: true, encoding: .utf8)
+                terminal.copy(self)
+                return true
+            case "v":
+                terminal.paste(self)
+                return true
+            case "a":
+                terminal.selectAll(self)
+                return true
+            default:
+                break
+            }
+        }
+        return terminal.performKeyEquivalent(with: event)
     }
 
     func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
@@ -379,6 +428,23 @@ final class ManagedTerminalView: NSView {
                         return event
                     }
 
+                    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                    if flags.contains(.command) {
+                        switch event.charactersIgnoringModifiers {
+                        case "c":
+                            self.terminal.copy(self)
+                            return nil
+                        case "v":
+                            self.terminal.paste(self)
+                            return nil
+                        case "a":
+                            self.terminal.selectAll(self)
+                            return nil
+                        default:
+                            break
+                        }
+                    }
+
                     if self.window?.firstResponder !== self.terminal {
                         self.window?.makeFirstResponder(self.terminal)
                     }
@@ -395,6 +461,12 @@ final class ManagedTerminalView: NSView {
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)
         }
+    }
+}
+
+private extension String {
+    var shQuoted: String {
+        "'" + replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
     }
 }
 
@@ -422,4 +494,5 @@ final class FixedCursorTerminalView: LocalProcessTerminalView {
         onMouseDownAction?()
         super.mouseDown(with: event)
     }
+
 }
