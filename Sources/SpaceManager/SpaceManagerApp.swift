@@ -61,6 +61,7 @@ struct SpaceManagerApp: App {
                     appState.addTmuxTab()
                 }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
+                .disabled(!TmuxBootstrap.isTmuxAvailable)
             }
 
             CommandMenu("Tabs") {

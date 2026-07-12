@@ -65,6 +65,7 @@ class AppState: ObservableObject {
         sessionsByWorkspace[ws.id] = wsSessions
         if selectedWorkspace?.id == ws.id {
             ensureSessions(for: ws)
+            selectedSessionIdByWorkspace[ws.id] = selectedSession?.id
         }
     }
 
