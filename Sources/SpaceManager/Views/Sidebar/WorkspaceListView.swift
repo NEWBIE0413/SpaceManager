@@ -70,6 +70,20 @@ struct WorkspaceListView: View {
                         Button("Rename...") {
                             // TODO: Show rename dialog
                         }
+                        Button("Edit tmux Session Name...") {
+                            let alert = NSAlert()
+                            alert.messageText = "tmux 세션명"
+                            alert.informativeText = "비워두면 이름에서 자동 파생됩니다. 현재: \(workspace.effectiveTmuxSessionName)"
+                            alert.addButton(withTitle: "저장")
+                            alert.addButton(withTitle: "취소")
+                            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 22))
+                            input.stringValue = workspace.tmuxSessionName ?? ""
+                            input.placeholderString = workspace.effectiveTmuxSessionName
+                            alert.accessoryView = input
+                            if alert.runModal() == .alertFirstButtonReturn {
+                                appState.setTmuxSessionName(workspace, to: input.stringValue)
+                            }
+                        }
                         Divider()
                         Button("Delete", role: .destructive) {
                             appState.deleteWorkspace(workspace)

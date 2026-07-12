@@ -39,17 +39,23 @@ struct AgentTabBar: View {
 
             Spacer()
 
-            // Add agent button
-            Button {
-                appState.addShellTab()
+            // Add tab menu: 셸 탭 / tmux 탭 (스펙 §5)
+            Menu {
+                Button("셸 탭") { appState.addShellTab() }
+                    .help("워크스페이스 루트에서 순수 zsh — 재시작 시 복구되지 않음")
+                if TmuxBootstrap.isTmuxAvailable {
+                    Button("tmux 탭") { appState.addTmuxTab() }
+                        .help("별도 tmux 세션 — 재부팅 후에도 복구됨")
+                }
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(.secondary)
             }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 12)
-            .help("New Terminal Tab")
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 40)
+            .help("New Tab")
         }
         .frame(height: 38)
         .background(Color(nsColor: .windowBackgroundColor))

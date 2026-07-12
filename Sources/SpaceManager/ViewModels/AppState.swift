@@ -46,6 +46,28 @@ class AppState: ObservableObject {
         }
     }
 
+    /// tmux 세션명 커스텀 설정 — 마이그레이션 수단 (기존 세션 이름을 그대로 기입하면 연결됨).
+    /// 변경 시 해당 워크스페이스의 메인 탭을 재생성해 새 세션명으로 재attach한다.
+    func setTmuxSessionName(_ workspace: Workspace, to raw: String) {
+        guard var ws = storage.workspace(id: workspace.id) else { return }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        ws.tmuxSessionName = trimmed.isEmpty ? nil : TmuxBootstrap.sanitizeSessionName(trimmed)
+        storage.updateWorkspace(ws)
+        if selectedWorkspace?.id == ws.id {
+            selectedWorkspace = ws
+        }
+        // 메인 탭 재생성 (탭 자체는 detach만 되고 tmux 세션은 무손실)
+        var wsSessions = sessionsByWorkspace[ws.id] ?? []
+        if let index = wsSessions.firstIndex(where: { $0.kind == .tmuxMain }) {
+            wsSessions[index].cleanup()
+            wsSessions.remove(at: index)
+        }
+        sessionsByWorkspace[ws.id] = wsSessions
+        if selectedWorkspace?.id == ws.id {
+            ensureSessions(for: ws)
+        }
+    }
+
     func deleteWorkspace(_ workspace: Workspace) {
         storage.deleteWorkspace(workspace)
         if let sessions = sessionsByWorkspace[workspace.id] {
@@ -170,11 +192,6 @@ class AppState: ObservableObject {
         }
         session.restartIfDead()
         session.focusTerminal()
-    }
-
-    func selectSession(id: UUID) {
-        guard let session = sessions.first(where: { $0.id == id }) else { return }
-        selectSession(session)
     }
 
     func moveSession(from sourceIndex: Int, to destinationIndex: Int) {

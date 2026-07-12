@@ -56,6 +56,11 @@ struct SpaceManagerApp: App {
                     appState.addShellTab()
                 }
                 .keyboardShortcut("t", modifiers: .command)
+
+                Button("New tmux Tab") {
+                    appState.addTmuxTab()
+                }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
             }
 
             CommandMenu("Tabs") {
