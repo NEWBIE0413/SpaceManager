@@ -1,9 +1,11 @@
 import SwiftUI
 import AppKit
 
-/// Main content view with two-pane layout
+/// Main content view with two-pane layout.
+/// 창마다 하나씩 생성된다 — AppState가 여기 살아야 창별 독립 선택이 가능하다.
 struct ContentView: View {
-    @EnvironmentObject var appState: AppState
+    @StateObject private var appState = AppState()
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         NavigationSplitView {
@@ -12,13 +14,20 @@ struct ContentView: View {
         } detail: {
             TerminalAreaView()
         }
+        .environmentObject(appState)
+        .focusedSceneObject(appState)
         .sheet(isPresented: $appState.showNewWorkspaceSheet) {
             NewWorkspaceSheet()
+                .environmentObject(appState)
         }
         .sheet(isPresented: $appState.showAddProjectSheet) {
             AddProjectSheet()
+                .environmentObject(appState)
         }
         .navigationTitle(appState.selectedWorkspace?.name ?? "SpaceManager")
+        .onAppear {
+            WindowRestorer.openRemainingWindowsIfNeeded(openWindow)
+        }
     }
 }
 
