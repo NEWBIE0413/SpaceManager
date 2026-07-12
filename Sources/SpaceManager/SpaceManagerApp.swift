@@ -28,9 +28,14 @@ struct SpaceManagerApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(appState)
-                .frame(minWidth: 900, minHeight: 600)
+            if ProcessInfo.processInfo.environment["SM_SPIKE"] == "1" {
+                TerminalSpikeView()
+                    .frame(minWidth: 900, minHeight: 600)
+            } else {
+                ContentView()
+                    .environmentObject(appState)
+                    .frame(minWidth: 900, minHeight: 600)
+            }
         }
         .windowStyle(.titleBar)
         .commands {
