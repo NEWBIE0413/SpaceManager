@@ -13,6 +13,8 @@ final class TerminalWebView: NSView {
     private var isReady = false
     private var pendingOutput = Data()
     private var flushScheduled = false
+    private var lastFlushTime: CFTimeInterval = 0
+    private let coalesceInterval: CFTimeInterval = 0.008
 
     override init(frame: NSRect) {
         let config = WKWebViewConfiguration()
@@ -57,16 +59,23 @@ final class TerminalWebView: NSView {
             guard let self else { return }
             self.pendingOutput.append(data)
             guard !self.flushScheduled else { return }
-            self.flushScheduled = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(8)) {
-                self.flushScheduled = false
+            // 어댑티브 플러시: 한가할 땐 즉시 전송(타이핑 에코 지연 0),
+            // 직전 플러시 후 8ms 안에 또 오면(폭주 출력) 코얼레싱으로 전환
+            if CACurrentMediaTime() - self.lastFlushTime >= self.coalesceInterval {
                 self.flushOutput()
+            } else {
+                self.flushScheduled = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(8)) {
+                    self.flushScheduled = false
+                    self.flushOutput()
+                }
             }
         }
     }
 
     private func flushOutput() {
         guard isReady, !pendingOutput.isEmpty else { return }
+        lastFlushTime = CACurrentMediaTime()
         let b64 = pendingOutput.base64EncodedString()
         pendingOutput.removeAll(keepingCapacity: true)
         webView.evaluateJavaScript("window.smWrite('\(b64)')", completionHandler: nil)

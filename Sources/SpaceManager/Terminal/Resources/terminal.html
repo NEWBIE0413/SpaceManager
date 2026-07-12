@@ -6,6 +6,13 @@
 <style>
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: transparent; }
   #terminal { width: 100%; height: 100%; }
+  /* 한글 조합 프리뷰: 네이티브 IME처럼 테마 색 + 밑줄로 표시 (기본은 검정 박스) */
+  #terminal .composition-view {
+    background: var(--term-bg, #1e1e1e);
+    color: var(--term-fg, #d4d4d4);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
 </style>
 </head>
 <body>
@@ -45,6 +52,108 @@
 
   new ResizeObserver(function () { fit.fit(); }).observe(document.getElementById('terminal'));
 
+  // --- WKWebView 한글 IME 수정 (xterm.js PR #5704 백포트) ---
+  // WKWebView는 한글 조합을 composition 이벤트가 아니라 insertText(첫 자모) +
+  // insertReplacementText(음절 갱신)로 전달한다. 순정 xterm은 insertText만 PTY로
+  // 보내므로 모음/완성 음절이 유실된다. 여기서는 조합 중엔 버퍼+프리뷰만 유지하고,
+  // 비IME keydown 또는 새 한글 삽입 시점에 완성 음절을 PTY로 보낸다.
+  (function () {
+    var core = term._core;
+    if (!core || !core.textarea) { return; }
+
+    function isHangul(t) {
+      var cp = t.codePointAt(0);
+      return !!cp && ((cp >= 0x1100 && cp <= 0x11FF) || (cp >= 0x3130 && cp <= 0x318F) ||
+                      (cp >= 0xAC00 && cp <= 0xD7AF) || (cp >= 0xA960 && cp <= 0xA97F) ||
+                      (cp >= 0xD7B0 && cp <= 0xD7FF));
+    }
+
+    var composing = false;
+    var pending = '';
+
+    function positionPreview() {
+      var v = core._compositionView;
+      var rs = core._renderService;
+      if (!v || !rs) { return; }
+      var cell = rs.dimensions.css.cell;
+      var b = core.buffer;
+      // 스크롤 보정된 화면상 커서 행
+      var row = Math.max(0, Math.min(b.y + b.ybase - b.ydisp, core.rows - 1));
+      v.style.left = (Math.min(b.x, core.cols - 1) * cell.width) + 'px';
+      v.style.top = (row * cell.height) + 'px';
+      v.style.height = cell.height + 'px';
+      v.style.lineHeight = cell.height + 'px';
+      v.style.fontFamily = term.options.fontFamily;
+      v.style.fontSize = term.options.fontSize + 'px';
+    }
+
+    function showPreview(text) {
+      var v = core._compositionView;
+      if (!v) { return; }
+      v.textContent = text;
+      v.classList.add('active');
+      positionPreview();
+    }
+
+    function hidePreview() {
+      var v = core._compositionView;
+      if (v) { v.textContent = ''; v.classList.remove('active'); }
+    }
+
+    function flush() {
+      if (!composing) { return; }
+      var text = pending;
+      composing = false;
+      pending = '';
+      hidePreview();
+      if (text) { core.coreService.triggerDataEvent(text, true); }
+    }
+
+    // keyCode 229 keydown마다 textarea 변경분을 자모 단위로 흘려보내는
+    // CompositionHelper 경로를 조합 중에는 차단한다
+    var ch = core._compositionHelper;
+    if (ch && typeof ch._handleAnyTextareaChanges === 'function') {
+      var origChanges = ch._handleAnyTextareaChanges.bind(ch);
+      ch._handleAnyTextareaChanges = function () { if (!composing) { origChanges(); } };
+    }
+
+    var origInputEvent = core._inputEvent.bind(core);
+    core._inputEvent = function (ev) {
+      if (ev.data && ev.inputType === 'insertReplacementText' && !term.options.screenReaderMode) {
+        composing = true;
+        pending = ev.data;
+        showPreview(ev.data);
+        ev.preventDefault();
+        ev.stopPropagation();
+        return true;
+      }
+      if (ev.data && ev.inputType === 'insertText' && isHangul(ev.data) && !term.options.screenReaderMode) {
+        flush();
+        composing = true;
+        pending = ev.data;
+        // 프리뷰는 항상 표시 — 커밋 직후 커서 위치가 stale해도
+        // 아래 onRender 재배치가 에코 도착 즉시 제자리로 옮긴다
+        showPreview(ev.data);
+        ev.preventDefault();
+        ev.stopPropagation();
+        return true;
+      }
+      return origInputEvent(ev);
+    };
+
+    // 비IME keydown(스페이스/엔터/화살표 등)이 xterm 키 처리로 들어가기 전에
+    // 조합 중이던 음절을 먼저 커밋한다. 캡처 단계 + 조상 요소 등록이라
+    // textarea에 걸린 xterm 리스너보다 항상 먼저 실행된다.
+    term.element.addEventListener('keydown', function (e) {
+      if (composing && e.keyCode !== 229) { flush(); }
+    }, true);
+
+    // 에코 도착·스크롤 등으로 커서가 움직일 때마다 조합 프리뷰를 따라붙인다
+    term.onRender(function () {
+      if (composing) { positionPreview(); }
+    });
+  })();
+
   // Swift가 호출하는 API
   window.smWrite = function (b64) {
     const raw = atob(b64);
@@ -56,7 +165,11 @@
   window.smGetSelection = function () { return term.getSelection(); };
   window.smSelectAll = function () { term.selectAll(); };
   window.smFocus = function () { term.focus(); };
-  window.smSetTheme = function (theme) { term.options.theme = theme; };
+  window.smSetTheme = function (theme) {
+    term.options.theme = theme;
+    document.documentElement.style.setProperty('--term-bg', theme.background);
+    document.documentElement.style.setProperty('--term-fg', theme.foreground);
+  };
 
   post('ready', { cols: term.cols, rows: term.rows });
 </script>
