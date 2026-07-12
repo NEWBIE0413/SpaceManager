@@ -9,6 +9,8 @@ class WorkspaceStorage: ObservableObject {
     private let decoder: JSONDecoder
 
     @Published var workspaces: [Workspace] = []
+    @Published var windowStates: [WindowState] = []
+    private var claimedWindowStateIds: Set<UUID> = []
 
     /// Base directory for storage
     private var storageDirectory: URL {
@@ -27,6 +29,10 @@ class WorkspaceStorage: ObservableObject {
         storageDirectory.appendingPathComponent("workspaces.json")
     }
 
+    private var windowStatesFile: URL {
+        storageDirectory.appendingPathComponent("window-states.json")
+    }
+
     private init() {
         encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -37,6 +43,7 @@ class WorkspaceStorage: ObservableObject {
 
         ensureStorageDirectoryExists()
         loadWorkspaces()
+        loadWindowStates()
         // models.json·agent-states.json은 더 이상 로드하지 않는다 (파일은 남겨둠 — 롤백 안전)
     }
 
@@ -113,5 +120,60 @@ class WorkspaceStorage: ObservableObject {
     /// Get workspace by ID
     func workspace(id: UUID) -> Workspace? {
         workspaces.first { $0.id == id }
+    }
+
+    // MARK: - Window State Persistence
+
+    func loadWindowStates() {
+        guard fileManager.fileExists(atPath: windowStatesFile.path) else {
+            windowStates = []
+            return
+        }
+        do {
+            let data = try Data(contentsOf: windowStatesFile)
+            windowStates = try decoder.decode([WindowState].self, from: data)
+        } catch {
+            print("Error loading window states: \(error)")
+            windowStates = []
+        }
+    }
+
+    func saveWindowStates() {
+        do {
+            let data = try encoder.encode(windowStates)
+            try data.write(to: windowStatesFile)
+        } catch {
+            print("Error saving window states: \(error)")
+        }
+    }
+
+    /// 아직 어떤 창도 가져가지 않은 저장 상태를 하나 claim (인메모리 — 파일은 불변)
+    func claimNextWindowState() -> WindowState? {
+        guard let state = windowStates.first(where: { !claimedWindowStateIds.contains($0.id) }) else {
+            return nil
+        }
+        claimedWindowStateIds.insert(state.id)
+        return state
+    }
+
+    func registerClaimed(_ id: UUID) {
+        claimedWindowStateIds.insert(id)
+    }
+
+    var claimedCount: Int { claimedWindowStateIds.count }
+
+    func updateWindowState(_ state: WindowState) {
+        if let index = windowStates.firstIndex(where: { $0.id == state.id }) {
+            windowStates[index] = state
+        } else {
+            windowStates.append(state)
+        }
+        saveWindowStates()
+    }
+
+    func removeWindowState(id: UUID) {
+        claimedWindowStateIds.remove(id)
+        windowStates.removeAll { $0.id == id }
+        saveWindowStates()
     }
 }

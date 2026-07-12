@@ -6,6 +6,8 @@ import Combine
 class AppState: ObservableObject {
     @Published var storage = WorkspaceStorage.shared
 
+    let windowStateId: UUID
+
     @Published var selectedWorkspace: Workspace?
     @Published var selectedProject: Project?
 
@@ -20,13 +22,67 @@ class AppState: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     init() {
+        // windowStateId(let)를 모든 분기에서 먼저 확정해야 한다 — self.storage 접근(구독 설정)은
+        // 저장 프로퍼티가 전부 초기화된 뒤에만 허용되므로, claim 판단을 그보다 앞에 끝낸다.
+        let claimed = WorkspaceStorage.shared.claimNextWindowState()
+        if let claimed {
+            windowStateId = claimed.id
+        } else {
+            windowStateId = UUID()
+            WorkspaceStorage.shared.registerClaimed(windowStateId)
+        }
+
         storage.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
 
-        if let first = storage.workspaces.first {
+        if let claimed {
+            restore(from: claimed)
+        } else if let first = storage.workspaces.first {
             selectWorkspace(first)
         }
+    }
+
+    deinit {
+        // 창이 닫히면 그 창의 상태를 제거. 앱 종료 시에는 유지해야 하므로 가드
+        // (macOS는 종료 시 deinit을 보장하지 않지만, 호출되는 경우를 방어)
+        if !AppTermination.isTerminating {
+            WorkspaceStorage.shared.removeWindowState(id: windowStateId)
+        }
+    }
+
+    private func restore(from state: WindowState) {
+        let workspaceIds = Set(storage.workspaces.map(\.id))
+        for wsTabs in state.workspaceTabs where workspaceIds.contains(wsTabs.workspaceId) {
+            let restored = wsTabs.tabs.map { TerminalSession(snapshot: $0) }
+            sessionsByWorkspace[wsTabs.workspaceId] = restored
+            if let selectedId = wsTabs.selectedTabId {
+                selectedSessionIdByWorkspace[wsTabs.workspaceId] = selectedId
+            }
+        }
+        // 터미널 프로세스는 여기서 시작하지 않는다 — 뷰가 붙고 xterm이 ready될 때 게으르게 시작
+        if let wsId = state.selectedWorkspaceId,
+           let workspace = storage.workspace(id: wsId) {
+            selectWorkspace(workspace)
+        } else if let first = storage.workspaces.first {
+            selectWorkspace(first)
+        }
+    }
+
+    private func persistWindowState() {
+        var wsStates: [WorkspaceTabsState] = []
+        for (wsId, wsSessions) in sessionsByWorkspace where !wsSessions.isEmpty {
+            wsStates.append(WorkspaceTabsState(
+                workspaceId: wsId,
+                selectedTabId: selectedSessionIdByWorkspace[wsId],
+                tabs: wsSessions.map { $0.snapshot() }
+            ))
+        }
+        WorkspaceStorage.shared.updateWindowState(WindowState(
+            id: windowStateId,
+            selectedWorkspaceId: selectedWorkspace?.id,
+            workspaceTabs: wsStates
+        ))
     }
 
     // MARK: - Workspace Management
@@ -67,6 +123,7 @@ class AppState: ObservableObject {
             ensureSessions(for: ws)
             selectedSessionIdByWorkspace[ws.id] = selectedSession?.id
         }
+        persistWindowState()
     }
 
     func deleteWorkspace(_ workspace: Workspace) {
@@ -86,6 +143,7 @@ class AppState: ObservableObject {
                 selectedSession = nil
             }
         }
+        persistWindowState()
     }
 
     func selectWorkspace(_ workspace: Workspace) {
@@ -96,6 +154,7 @@ class AppState: ObservableObject {
         selectedWorkspace = workspace
         selectedProject = Project(path: workspace.rootPath, name: workspace.name)
         ensureSessions(for: workspace)
+        persistWindowState()
     }
 
     // MARK: - Project Management
@@ -169,6 +228,7 @@ class AppState: ObservableObject {
         sessions.append(session)
         sessionsByWorkspace[workspace.id] = sessions
         selectSession(session)
+        persistWindowState()
     }
 
     func removeSession(_ session: TerminalSession) {
@@ -180,6 +240,7 @@ class AppState: ObservableObject {
         if selectedSession?.id == session.id {
             selectedSession = sessions.first
         }
+        persistWindowState()
     }
 
     func selectSession(_ session: TerminalSession) {
@@ -193,6 +254,7 @@ class AppState: ObservableObject {
         }
         session.restartIfDead()
         session.focusTerminal()
+        persistWindowState()
     }
 
     func moveSession(from sourceIndex: Int, to destinationIndex: Int) {
@@ -205,6 +267,7 @@ class AppState: ObservableObject {
         if let workspace = selectedWorkspace {
             sessionsByWorkspace[workspace.id] = updated
         }
+        persistWindowState()
     }
 
     func selectNextSession() {

@@ -123,3 +123,17 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
         lhs.id == rhs.id
     }
 }
+
+extension TerminalSession {
+    convenience init(snapshot: TabSnapshot) {
+        self.init(id: snapshot.id, kind: snapshot.kind, name: snapshot.name,
+                  workingDirectory: snapshot.workingDirectory,
+                  tmuxSessionName: snapshot.tmuxSessionName)
+    }
+
+    func snapshot() -> TabSnapshot {
+        TabSnapshot(id: id, kind: kind, name: name,
+                    workingDirectory: workingDirectory,
+                    tmuxSessionName: tmuxSessionName)
+    }
+}
