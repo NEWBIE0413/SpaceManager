@@ -8,6 +8,7 @@ class WorkspaceStorage: ObservableObject {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
+    /// 레거시 마이그레이션 입력 전용 (읽기 전용) — 워크스페이스의 실소유는 창별 WindowState.
     @Published var workspaces: [Workspace] = []
     @Published var windowStates: [WindowState] = []
     private var claimedWindowStateIds: Set<UUID> = []
@@ -75,53 +76,6 @@ class WorkspaceStorage: ObservableObject {
         }
     }
 
-    /// Save all workspaces to disk
-    func saveWorkspaces() {
-        do {
-            let data = try encoder.encode(workspaces)
-            try data.write(to: workspacesFile)
-        } catch {
-            print("Error saving workspaces: \(error)")
-        }
-    }
-
-    /// Add a new workspace
-    func addWorkspace(_ workspace: Workspace) {
-        workspaces.append(workspace)
-        saveWorkspaces()
-    }
-
-    /// Update an existing workspace
-    func updateWorkspace(_ workspace: Workspace) {
-        if let index = workspaces.firstIndex(where: { $0.id == workspace.id }) {
-            workspaces[index] = workspace
-            saveWorkspaces()
-        }
-    }
-
-    /// Delete a workspace
-    func deleteWorkspace(_ workspace: Workspace) {
-        workspaces.removeAll { $0.id == workspace.id }
-        saveWorkspaces()
-    }
-
-    /// Move a workspace to a new position
-    func moveWorkspace(from sourceIndex: Int, to destinationIndex: Int) {
-        guard sourceIndex != destinationIndex else { return }
-        guard sourceIndex >= 0, sourceIndex < workspaces.count else { return }
-        guard destinationIndex >= 0, destinationIndex <= workspaces.count else { return }
-
-        var updated = workspaces
-        updated.move(fromOffsets: IndexSet(integer: sourceIndex), toOffset: destinationIndex)
-        workspaces = updated
-        saveWorkspaces()
-    }
-
-    /// Get workspace by ID
-    func workspace(id: UUID) -> Workspace? {
-        workspaces.first { $0.id == id }
-    }
-
     // MARK: - Window State Persistence
 
     func loadWindowStates() {
@@ -141,7 +95,7 @@ class WorkspaceStorage: ObservableObject {
     func saveWindowStates() {
         do {
             let data = try encoder.encode(windowStates)
-            try data.write(to: windowStatesFile)
+            try data.write(to: windowStatesFile, options: .atomic)
         } catch {
             print("Error saving window states: \(error)")
         }

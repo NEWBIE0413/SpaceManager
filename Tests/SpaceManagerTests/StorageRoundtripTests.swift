@@ -33,4 +33,12 @@ final class StorageRoundtripTests: XCTestCase {
         XCTAssertEqual(ws.name, "x")
         XCTAssertNil(ws.tmuxSessionName)   // 구 파일 호환: 새 필드 없어도 로드됨
     }
+
+    func testWindowStateDecodesLegacyJSONWithoutWorkspacesField() throws {
+        let legacy = """
+        {"id":"\(UUID().uuidString)","selectedWorkspaceId":null,"workspaceTabs":[]}
+        """
+        let state = try JSONDecoder().decode(WindowState.self, from: Data(legacy.utf8))
+        XCTAssertNil(state.workspaces)   // 레거시 상태 → 전역 목록 폴백 트리거
+    }
 }

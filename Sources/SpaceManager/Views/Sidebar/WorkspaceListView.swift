@@ -70,7 +70,18 @@ struct WorkspaceListView: View {
                             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: workspace.rootPath)
                         }
                         Button("Rename...") {
-                            // TODO: Show rename dialog
+                            let alert = NSAlert()
+                            alert.messageText = "워크스페이스 이름"
+                            alert.informativeText = "비워두면 폴더명으로 돌아갑니다."
+                            alert.addButton(withTitle: "저장")
+                            alert.addButton(withTitle: "취소")
+                            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 22))
+                            input.stringValue = workspace.customName ?? ""
+                            input.placeholderString = workspace.name
+                            alert.accessoryView = input
+                            if alert.runModal() == .alertFirstButtonReturn {
+                                appState.renameWorkspace(workspace, to: input.stringValue.isEmpty ? nil : input.stringValue)
+                            }
                         }
                         Button("Edit tmux Session Name...") {
                             let alert = NSAlert()

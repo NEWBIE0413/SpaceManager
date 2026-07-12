@@ -21,7 +21,7 @@ Every workspace is a real tmux session, attached by name the moment you select i
 - **Real Terminal**: xterm.js-based terminal (same engine as VS Code) — full mouse support, TUI apps, IME, native copy/paste
 - **tmux-Native Workspaces**: Selecting a workspace auto-attaches to its tmux session by name. Pair with tmux-resurrect/continuum and everything survives reboots
 - **Multi-Window**: Every window is a full IDE — put a different project on each Space
-- **Terminal Tabs**: Plain shell tabs or extra tmux session tabs, drag to reorder
+- **Terminal Tabs**: Plain shell tabs or extra tmux session tabs, folded into a list under the active workspace in the sidebar
 - **File Browser**: Read-only project tree in the sidebar for quick reference
 
 ## Demo
@@ -60,12 +60,14 @@ open Package.swift
 ### Workspaces
 - Click "+" next to WORKSPACES to create one — pick a root folder, optionally give it a custom name
 - Selecting a workspace auto-attaches its terminal to a tmux session (created if it doesn't exist yet)
-- Right-click a workspace → "Show in Finder" or "Delete"
+- Right-click a workspace → "Show in Finder", "Rename...", "Edit tmux Session Name...", or "Delete"
+- Drag a workspace row to reorder it in the sidebar list
 
 ### Tabs
 - Click "+" in the tab bar to add a tab: a plain shell tab (no tmux, doesn't survive an app restart) or an extra tmux tab (its own named tmux session, restorable)
 - The first tab of a workspace is always its main tmux session
-- Drag tabs to reorder them
+- When a workspace has 2+ tabs, they appear as an indented list under it in the sidebar — click a tab to switch, hover it and click × to close
+- Cycle tabs with `Cmd+Opt+←` / `Cmd+Opt+→`
 
 ### tmux Session Name
 - Right-click a workspace → "Edit tmux Session Name..." to point it at an existing tmux session instead of the auto-derived one — handy when migrating sessions you already had running before installing SpaceManager

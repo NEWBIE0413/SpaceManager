@@ -34,6 +34,15 @@ class AppState: ObservableObject {
 
         if let claimed {
             restore(from: claimed)
+        } else if storage.windowStates.isEmpty && !storage.workspaces.isEmpty {
+            // 업그레이드 경로: 창 상태가 하나도 없으면 레거시 전역 목록(workspaces.json)을
+            // 첫 창으로 1회 이관한다. 이후 생성되는 새 창(Cmd+N)은 빈 목록으로 시작.
+            workspaces = storage.workspaces
+            if let first = workspaces.first {
+                selectWorkspace(first)
+            } else {
+                persistWindowState()
+            }
         }
         // 새 창은 빈 워크스페이스 목록으로 시작한다
     }
@@ -268,19 +277,6 @@ class AppState: ObservableObject {
         }
         session.restartIfDead()
         session.focusTerminal()
-        persistWindowState()
-    }
-
-    func moveSession(from sourceIndex: Int, to destinationIndex: Int) {
-        guard sourceIndex != destinationIndex,
-              sourceIndex >= 0, sourceIndex < sessions.count,
-              destinationIndex >= 0, destinationIndex <= sessions.count else { return }
-        var updated = sessions
-        updated.move(fromOffsets: IndexSet(integer: sourceIndex), toOffset: destinationIndex)
-        sessions = updated
-        if let workspace = selectedWorkspace {
-            sessionsByWorkspace[workspace.id] = updated
-        }
         persistWindowState()
     }
 
