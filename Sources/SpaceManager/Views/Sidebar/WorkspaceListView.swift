@@ -32,14 +32,14 @@ struct WorkspaceListView: View {
             .padding(.top, 12)
             .padding(.bottom, 6)
 
-            if appState.storage.workspaces.isEmpty {
+            if appState.workspaces.isEmpty {
                 Text("No workspaces")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 4)
             } else {
-                ForEach(appState.storage.workspaces) { workspace in
+                ForEach(appState.workspaces) { workspace in
                     WorkspaceRow(
                         workspace: workspace,
                         isSelected: appState.selectedWorkspace?.id == workspace.id,
@@ -57,11 +57,11 @@ struct WorkspaceListView: View {
                         of: [UTType.text],
                         delegate: WorkspaceDropDelegate(
                             target: workspace,
-                            workspaces: { appState.storage.workspaces },
+                            workspaces: { appState.workspaces },
                             dragging: $draggingWorkspace
                         ) { source, destination in
                             withAnimation(.easeInOut(duration: 0.15)) {
-                                appState.storage.moveWorkspace(from: source, to: destination)
+                                appState.moveWorkspace(from: source, to: destination)
                             }
                         }
                     )

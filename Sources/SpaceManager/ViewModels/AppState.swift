@@ -4,10 +4,12 @@ import Combine
 
 /// 창 하나의 상태. 워크스페이스 목록 자체는 WorkspaceStorage.shared(전역)가 소유한다.
 class AppState: ObservableObject {
-    @Published var storage = WorkspaceStorage.shared
+    let storage = WorkspaceStorage.shared
 
     let windowStateId: UUID
 
+    /// 이 창이 소유한 워크스페이스 목록 (창별 독립 — 전역 공유 아님)
+    @Published var workspaces: [Workspace] = []
     @Published var selectedWorkspace: Workspace?
     @Published var selectedProject: Project?
 
@@ -18,8 +20,6 @@ class AppState: ObservableObject {
 
     @Published var showNewWorkspaceSheet = false
     @Published var showAddProjectSheet = false
-
-    private var cancellables = Set<AnyCancellable>()
 
     init() {
         // windowStateId(let)를 모든 분기에서 먼저 확정해야 한다 — self.storage 접근(구독 설정)은
@@ -32,15 +32,10 @@ class AppState: ObservableObject {
             WorkspaceStorage.shared.registerClaimed(windowStateId)
         }
 
-        storage.objectWillChange
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
-
         if let claimed {
             restore(from: claimed)
-        } else if let first = storage.workspaces.first {
-            selectWorkspace(first)
         }
+        // 새 창은 빈 워크스페이스 목록으로 시작한다
     }
 
     deinit {
@@ -52,7 +47,9 @@ class AppState: ObservableObject {
     }
 
     private func restore(from state: WindowState) {
-        let workspaceIds = Set(storage.workspaces.map(\.id))
+        // 레거시 상태(workspaces 없음)는 전역 목록에서 1회 이관
+        workspaces = state.workspaces ?? storage.workspaces
+        let workspaceIds = Set(workspaces.map(\.id))
         for wsTabs in state.workspaceTabs where workspaceIds.contains(wsTabs.workspaceId) {
             let restored = wsTabs.tabs.map { TerminalSession(snapshot: $0) }
             sessionsByWorkspace[wsTabs.workspaceId] = restored
@@ -62,9 +59,9 @@ class AppState: ObservableObject {
         }
         // 터미널 프로세스는 여기서 시작하지 않는다 — 뷰가 붙고 xterm이 ready될 때 게으르게 시작
         if let wsId = state.selectedWorkspaceId,
-           let workspace = storage.workspace(id: wsId) {
+           let workspace = workspaces.first(where: { $0.id == wsId }) {
             selectWorkspace(workspace)
-        } else if let first = storage.workspaces.first {
+        } else if let first = workspaces.first {
             selectWorkspace(first)
         }
     }
@@ -81,6 +78,7 @@ class AppState: ObservableObject {
         WorkspaceStorage.shared.updateWindowState(WindowState(
             id: windowStateId,
             selectedWorkspaceId: selectedWorkspace?.id,
+            workspaces: workspaces,
             workspaceTabs: wsStates
         ))
     }
@@ -89,26 +87,40 @@ class AppState: ObservableObject {
 
     func createWorkspace(rootPath: String, customName: String? = nil) {
         let workspace = Workspace(rootPath: rootPath, customName: customName)
-        storage.addWorkspace(workspace)
+        workspaces.append(workspace)
         selectWorkspace(workspace)
     }
 
+    private func workspaceIndex(id: UUID) -> Int? {
+        workspaces.firstIndex(where: { $0.id == id })
+    }
+
     func renameWorkspace(_ workspace: Workspace, to newName: String?) {
-        guard var ws = storage.workspace(id: workspace.id) else { return }
-        ws.rename(to: newName)
-        storage.updateWorkspace(ws)
-        if selectedWorkspace?.id == ws.id {
-            selectedWorkspace = ws
+        guard let index = workspaceIndex(id: workspace.id) else { return }
+        workspaces[index].rename(to: newName)
+        if selectedWorkspace?.id == workspace.id {
+            selectedWorkspace = workspaces[index]
         }
+        persistWindowState()
+    }
+
+    func moveWorkspace(from sourceIndex: Int, to destinationIndex: Int) {
+        guard sourceIndex != destinationIndex,
+              sourceIndex >= 0, sourceIndex < workspaces.count,
+              destinationIndex >= 0, destinationIndex <= workspaces.count else { return }
+        var updated = workspaces
+        updated.move(fromOffsets: IndexSet(integer: sourceIndex), toOffset: destinationIndex)
+        workspaces = updated
+        persistWindowState()
     }
 
     /// tmux 세션명 커스텀 설정 — 마이그레이션 수단 (기존 세션 이름을 그대로 기입하면 연결됨).
     /// 변경 시 해당 워크스페이스의 메인 탭을 재생성해 새 세션명으로 재attach한다.
     func setTmuxSessionName(_ workspace: Workspace, to raw: String) {
-        guard var ws = storage.workspace(id: workspace.id) else { return }
+        guard let index = workspaceIndex(id: workspace.id) else { return }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        ws.tmuxSessionName = trimmed.isEmpty ? nil : TmuxBootstrap.sanitizeSessionName(trimmed)
-        storage.updateWorkspace(ws)
+        workspaces[index].tmuxSessionName = trimmed.isEmpty ? nil : TmuxBootstrap.sanitizeSessionName(trimmed)
+        let ws = workspaces[index]
         if selectedWorkspace?.id == ws.id {
             selectedWorkspace = ws
         }
@@ -127,14 +139,14 @@ class AppState: ObservableObject {
     }
 
     func deleteWorkspace(_ workspace: Workspace) {
-        storage.deleteWorkspace(workspace)
+        workspaces.removeAll { $0.id == workspace.id }
         if let sessions = sessionsByWorkspace[workspace.id] {
             for session in sessions { session.cleanup() }
         }
         sessionsByWorkspace[workspace.id] = nil
         selectedSessionIdByWorkspace[workspace.id] = nil
         if selectedWorkspace?.id == workspace.id {
-            if let next = storage.workspaces.first {
+            if let next = workspaces.first {
                 selectWorkspace(next)
             } else {
                 selectedWorkspace = nil
@@ -160,20 +172,22 @@ class AppState: ObservableObject {
     // MARK: - Project Management
 
     func addProject(path: String) {
-        guard var workspace = selectedWorkspace else { return }
-        workspace.addProject(Project(path: path))
-        storage.updateWorkspace(workspace)
-        selectedWorkspace = workspace
+        guard let selected = selectedWorkspace,
+              let index = workspaceIndex(id: selected.id) else { return }
+        workspaces[index].addProject(Project(path: path))
+        selectedWorkspace = workspaces[index]
+        persistWindowState()
     }
 
     func removeProject(_ project: Project) {
-        guard var workspace = selectedWorkspace else { return }
-        workspace.removeProject(id: project.id)
-        storage.updateWorkspace(workspace)
-        selectedWorkspace = workspace
+        guard let selected = selectedWorkspace,
+              let index = workspaceIndex(id: selected.id) else { return }
+        workspaces[index].removeProject(id: project.id)
+        selectedWorkspace = workspaces[index]
         if selectedProject?.id == project.id {
-            selectedProject = workspace.projects.first
+            selectedProject = workspaces[index].projects.first
         }
+        persistWindowState()
     }
 
     func selectProject(_ project: Project) {
