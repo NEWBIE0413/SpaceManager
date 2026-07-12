@@ -29,6 +29,7 @@ struct Workspace: Codable, Identifiable, Equatable {
     var additionalProjects: [Project]
     var createdAt: Date
     var updatedAt: Date
+    var tmuxSessionName: String?
 
     var name: String {
         customName ?? URL(fileURLWithPath: rootPath).lastPathComponent
@@ -40,17 +41,27 @@ struct Workspace: Codable, Identifiable, Equatable {
         return all
     }
 
-    init(id: UUID = UUID(), rootPath: String, customName: String? = nil, additionalProjects: [Project] = []) {
+    /// 실제 사용할 tmux 세션명 — 커스텀 값이 있으면 그것, 없으면 이름에서 파생
+    var effectiveTmuxSessionName: String {
+        if let custom = tmuxSessionName,
+           !custom.trimmingCharacters(in: .whitespaces).isEmpty {
+            return custom
+        }
+        return TmuxBootstrap.sanitizeSessionName(name)
+    }
+
+    init(id: UUID = UUID(), rootPath: String, customName: String? = nil, additionalProjects: [Project] = [], tmuxSessionName: String? = nil) {
         self.id = id
         self.rootPath = rootPath
         self.customName = customName
         self.additionalProjects = additionalProjects
+        self.tmuxSessionName = tmuxSessionName
         self.createdAt = Date()
         self.updatedAt = Date()
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, rootPath, customName, additionalProjects, createdAt, updatedAt
+        case id, rootPath, customName, additionalProjects, createdAt, updatedAt, tmuxSessionName
     }
 
     init(from decoder: Decoder) throws {
@@ -61,6 +72,7 @@ struct Workspace: Codable, Identifiable, Equatable {
         additionalProjects = try container.decodeIfPresent([Project].self, forKey: .additionalProjects) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        tmuxSessionName = try container.decodeIfPresent(String.self, forKey: .tmuxSessionName)
     }
 
     mutating func addProject(_ project: Project) {

@@ -460,12 +460,6 @@ final class ManagedTerminalView: NSView {
     }
 }
 
-private extension String {
-    var shQuoted: String {
-        "'" + replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
-    }
-}
-
 final class FixedCursorTerminalView: LocalProcessTerminalView {
     var preferredCursorStyle: CursorStyle = .steadyBar
     var preferredCursorColor: NSColor = NSColor.textBackgroundColor
