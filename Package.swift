@@ -15,7 +15,10 @@ let package = Package(
             dependencies: [
                 .product(name: "SwiftTerm", package: "SwiftTerm")
             ],
-            path: "Sources/SpaceManager"
+            path: "Sources/SpaceManager",
+            resources: [
+                .copy("Terminal/Resources")
+            ]
         )
     ]
 )

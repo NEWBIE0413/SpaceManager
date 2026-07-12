@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="xterm.css">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: transparent; }
+  #terminal { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="terminal"></div>
+<script src="xterm.js"></script>
+<script src="addon-fit.js"></script>
+<script src="addon-webgl.js"></script>
+<script>
+  const term = new Terminal({
+    allowProposedApi: true,
+    cursorBlink: true,
+    cursorStyle: 'bar',
+    fontSize: 13,
+    fontFamily: '"D2Coding", "NanumGothicCoding", "Noto Sans Mono CJK KR", "SF Mono", Menlo, monospace',
+    scrollback: 10000,
+    macOptionIsMeta: false,
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('terminal'));
+  try { term.loadAddon(new WebglAddon.WebglAddon()); } catch (e) { /* webgl 불가 시 canvas 폴백 */ }
+  fit.fit();
+
+  function post(type, payload) {
+    window.webkit.messageHandlers.bridge.postMessage({ type: type, payload: payload === undefined ? null : payload });
+  }
+
+  // 키입력·IME 조합 결과·마우스 리포트 전부 onData로 들어온다
+  term.onData(function (d) { post('input', d); });
+  term.onResize(function (s) { post('resize', { cols: s.cols, rows: s.rows }); });
+
+  // Cmd+C/V/A는 네이티브(Swift)가 처리하므로 xterm이 삼키지 않게 통과시킨다
+  term.attachCustomKeyEventHandler(function (e) {
+    if (e.metaKey && ['c', 'v', 'a'].indexOf(e.key.toLowerCase()) >= 0) { return false; }
+    return true;
+  });
+
+  new ResizeObserver(function () { fit.fit(); }).observe(document.getElementById('terminal'));
+
+  // Swift가 호출하는 API
+  window.smWrite = function (b64) {
+    const raw = atob(b64);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) { bytes[i] = raw.charCodeAt(i); }
+    term.write(bytes); // 바이트 단위 write — 멀티바이트(UTF-8) 경계는 xterm 디코더가 처리
+  };
+  window.smPaste = function (text) { term.paste(text); };
+  window.smGetSelection = function () { return term.getSelection(); };
+  window.smSelectAll = function () { term.selectAll(); };
+  window.smFocus = function () { term.focus(); };
+  window.smSetTheme = function (theme) { term.options.theme = theme; };
+
+  post('ready', { cols: term.cols, rows: term.rows });
+</script>
+</body>
+</html>
