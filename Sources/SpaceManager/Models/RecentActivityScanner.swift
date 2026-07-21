@@ -18,6 +18,10 @@ struct RecentClaudeSession: Identifiable, Equatable {
 /// 한 번의 스캔이 두 소비자를 먹인다:
 /// - 아일랜드: 지난 1시간, 상위 8개, 스니펫 포함
 /// - 사이드바 활동 점: 지난 24시간, cwd별 마지막 대화 시각 (진하기 계산용)
+///
+/// 생성 중 신호는 별도의 빠른 경로가 맡는다. 전체 디렉토리 탐색은 30초마다 하되,
+/// 거기서 찾은 24시간 내 transcript만 2초마다 stat한다. 최근 4초 안에 mtime이
+/// 갱신된 cwd를 "모델이 지금 응답을 생성 중"으로 본다.
 final class RecentActivityScanner: ObservableObject {
     /// 모든 창이 같은 데이터를 보므로 하나만 돈다
     static let shared = RecentActivityScanner()
@@ -25,6 +29,8 @@ final class RecentActivityScanner: ObservableObject {
     @Published private(set) var sessions: [RecentClaudeSession] = []
     /// cwd → 마지막 대화 시각 (24시간 창)
     @Published private(set) var workspaceActivity: [String: Date] = [:]
+    /// 지금 transcript가 자라고 있는 cwd들
+    @Published private(set) var generatingDirectories: Set<String> = []
 
     /// 아일랜드의 "최근" — 지난 1시간
     static let islandWindow: TimeInterval = 3600
@@ -32,17 +38,30 @@ final class RecentActivityScanner: ObservableObject {
     static let dotWindow: TimeInterval = 86400
     /// 아일랜드가 소음이 되지 않도록 표시 개수 제한
     static let maxSessions = 8
+    /// 알려진 transcript만 stat하는 빠른 폴 간격
+    static let generatingPollInterval: TimeInterval = 2
+    /// 마지막 append 이후 이 시간 동안 생성 중으로 본다. 폴 간격을 합쳐 최대 약 6초 내 해제.
+    static let generatingWindow: TimeInterval = 4
+
+    struct TrackedTranscript: Equatable {
+        let url: URL
+        let cwd: String
+    }
 
     struct ScanResult: Equatable {
         var sessions: [RecentClaudeSession] = []
         var activityByCwd: [String: Date] = [:]
+        var trackedTranscripts: [TrackedTranscript] = []
     }
 
     private let projectsDir: URL
-    private var timer: Timer?
+    private var discoveryTimer: Timer?
+    private var generatingTimer: Timer?
     private let queue = DispatchQueue(label: "SpaceManager.RecentActivity", qos: .utility)
     /// transcript 파일의 cwd는 불변이므로 한 번 읽으면 캐시한다 (queue 위에서만 접근)
     private var cwdCache: [String: String] = [:]
+    /// 최근 전체 탐색에서 찾은 24시간 내 transcript (queue 위에서만 접근)
+    private var trackedTranscripts: [TrackedTranscript] = []
 
     init(projectsDir: URL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".claude/projects")) {
@@ -50,16 +69,21 @@ final class RecentActivityScanner: ObservableObject {
     }
 
     func start() {
-        guard timer == nil else { return }
+        guard discoveryTimer == nil, generatingTimer == nil else { return }
         rescan()
-        timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+        discoveryTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.rescan()
+        }
+        generatingTimer = Timer.scheduledTimer(withTimeInterval: Self.generatingPollInterval, repeats: true) { [weak self] _ in
+            self?.pollGeneratingDirectories()
         }
     }
 
     func stop() {
-        timer?.invalidate()
-        timer = nil
+        discoveryTimer?.invalidate()
+        discoveryTimer = nil
+        generatingTimer?.invalidate()
+        generatingTimer = nil
     }
 
     func rescan() {
@@ -67,9 +91,24 @@ final class RecentActivityScanner: ObservableObject {
         queue.async { [weak self] in
             guard let self else { return }
             let result = Self.scan(projectsDir: dir, cwdCache: &self.cwdCache)
+            self.trackedTranscripts = result.trackedTranscripts
+            let generating = Self.findGeneratingDirectories(in: result.trackedTranscripts)
             DispatchQueue.main.async {
                 if self.sessions != result.sessions { self.sessions = result.sessions }
                 if self.workspaceActivity != result.activityByCwd { self.workspaceActivity = result.activityByCwd }
+                if self.generatingDirectories != generating { self.generatingDirectories = generating }
+            }
+        }
+    }
+
+    private func pollGeneratingDirectories() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            let generating = Self.findGeneratingDirectories(in: self.trackedTranscripts)
+            DispatchQueue.main.async {
+                if self.generatingDirectories != generating {
+                    self.generatingDirectories = generating
+                }
             }
         }
     }
@@ -109,6 +148,7 @@ final class RecentActivityScanner: ObservableObject {
             }
             guard let cwd else { continue }
             result.activityByCwd[cwd] = max(result.activityByCwd[cwd] ?? .distantPast, entry.mtime)
+            result.trackedTranscripts.append(TrackedTranscript(url: entry.url, cwd: cwd))
         }
 
         // 1시간 창 상위 8개만 스니펫까지 파싱 (아일랜드)
@@ -126,6 +166,26 @@ final class RecentActivityScanner: ObservableObject {
                 lastActivity: entry.mtime,
                 snippet: parsed.snippet
             )
+        }
+        return result
+    }
+
+    /// 전체 탐색에서 이미 확인한 transcript만 stat하는 빠른 경로.
+    /// tmux 화면·프로세스 상태는 보지 않으므로 유휴 TUI나 dev server에는 반응하지 않는다.
+    static func findGeneratingDirectories(
+        in transcripts: [TrackedTranscript],
+        now: Date = Date()
+    ) -> Set<String> {
+        var result = Set<String>()
+        for transcript in transcripts {
+            // URLResourceValues는 같은 URL의 속성을 캐시할 수 있어 빠른 폴 경로에 부적합하다.
+            // 매번 실제 stat을 수행해 append와 삭제를 즉시 관측한다.
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: transcript.url.path),
+                  let mtime = attributes[.modificationDate] as? Date else { continue }
+            let age = now.timeIntervalSince(mtime)
+            if age >= 0, age <= generatingWindow {
+                result.insert(transcript.cwd)
+            }
         }
         return result
     }

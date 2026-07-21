@@ -105,4 +105,53 @@ final class RecentActivityScannerTests: XCTestCase {
         XCTAssertEqual(found.first?.name, "p0")
         XCTAssertEqual(found.first.map(\.lastActivity), found.map(\.lastActivity).max())
     }
+
+    func testGeneratingDirectoriesComeFromRecentTranscriptMtime() throws {
+        let now = Date()
+        _ = try writeTranscript(project: "-tmp-active", session: "active", lines: [
+            #"{"type":"user","cwd":"/tmp/active","message":{"content":"응답해줘"}}"#,
+        ], mtime: now.addingTimeInterval(-1))
+        _ = try writeTranscript(project: "-tmp-idle", session: "idle", lines: [
+            #"{"type":"user","cwd":"/tmp/idle","message":{"content":"끝난 작업"}}"#,
+        ], mtime: now.addingTimeInterval(-(RecentActivityScanner.generatingWindow + 1)))
+
+        let scan = scanNow(now: now)
+        XCTAssertEqual(Set(scan.trackedTranscripts.map(\.cwd)), ["/tmp/active", "/tmp/idle"])
+        XCTAssertEqual(
+            RecentActivityScanner.findGeneratingDirectories(in: scan.trackedTranscripts, now: now),
+            ["/tmp/active"]
+        )
+    }
+
+    func testGeneratingDirectoryExpiresWithinFastPollWindow() throws {
+        let writtenAt = Date()
+        _ = try writeTranscript(project: "-tmp-expiring", session: "expiring", lines: [
+            #"{"type":"assistant","cwd":"/tmp/expiring","message":{"content":"생성 중"}}"#,
+        ], mtime: writtenAt)
+        let scan = scanNow(now: writtenAt)
+
+        XCTAssertEqual(
+            RecentActivityScanner.findGeneratingDirectories(in: scan.trackedTranscripts, now: writtenAt),
+            ["/tmp/expiring"]
+        )
+        XCTAssertTrue(
+            RecentActivityScanner.findGeneratingDirectories(
+                in: scan.trackedTranscripts,
+                now: writtenAt.addingTimeInterval(RecentActivityScanner.generatingWindow + 0.1)
+            ).isEmpty
+        )
+    }
+
+    func testDeletedTrackedTranscriptIsNotGenerating() throws {
+        let now = Date()
+        let file = try writeTranscript(project: "-tmp-deleted", session: "deleted", lines: [
+            #"{"type":"assistant","cwd":"/tmp/deleted","message":{"content":"생성 중"}}"#,
+        ], mtime: now)
+        let scan = scanNow(now: now)
+        try FileManager.default.removeItem(at: file)
+
+        XCTAssertTrue(
+            RecentActivityScanner.findGeneratingDirectories(in: scan.trackedTranscripts, now: now).isEmpty
+        )
+    }
 }

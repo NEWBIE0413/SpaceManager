@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 /// List of workspaces in the sidebar
 struct WorkspaceListView: View {
     @EnvironmentObject var appState: AppState
-    @ObservedObject private var agentMonitor = TmuxAgentMonitor.shared
     @ObservedObject private var activity = RecentActivityScanner.shared
     @State private var isHoveringHeader = false
     @State private var draggingWorkspace: Workspace?
@@ -17,11 +16,10 @@ struct WorkspaceListView: View {
             .max()
     }
 
-    /// 이 워크스페이스의 tmux 세션(base 또는 base-N)에 지금 출력 중인 에이전트가 있는지
-    private func isWorking(_ workspace: Workspace) -> Bool {
-        let base = workspace.effectiveTmuxSessionName
-        return agentMonitor.states.contains { session, state in
-            state == .working && TmuxBootstrap.sessionBelongs(session: session, base: base)
+    /// 이 워크스페이스(루트 및 하위 경로)의 transcript가 지금 자라고 있는지
+    private func isGenerating(_ workspace: Workspace) -> Bool {
+        activity.generatingDirectories.contains {
+            $0 == workspace.rootPath || $0.hasPrefix(workspace.rootPath + "/")
         }
     }
 
@@ -53,7 +51,7 @@ struct WorkspaceListView: View {
                         workspace: workspace,
                         isSelected: appState.selectedWorkspace?.id == workspace.id,
                         lastConversation: lastConversation(for: workspace),
-                        isWorking: isWorking(workspace),
+                        isGenerating: isGenerating(workspace),
                         onAddShellTab: { appState.selectWorkspace(workspace); appState.addShellTab() },
                         onAddTmuxTab: { appState.selectWorkspace(workspace); appState.addTmuxTab() }
                     )
@@ -129,7 +127,6 @@ struct WorkspaceListView: View {
                 .padding(.horizontal, 8)
             }
         }
-        .onAppear { TmuxAgentMonitor.shared.start() }
     }
 }
 
@@ -141,15 +138,15 @@ struct WorkspaceListView: View {
 /// 점 둘레에 스피너가 돈다. 자리는 항상 확보해 상태가 오가도 행이 밀리지 않는다.
 struct WorkspaceActivityDot: View {
     let lastConversation: Date?
-    let isWorking: Bool
+    let isGenerating: Bool
     @State private var spin = false
 
-    /// 최근성 → 진하기. 초반엔 천천히, 끝으로 갈수록 빨리 흐려지는 제곱 곡선 —
-    /// "오늘 아침에 만진 것"과 "어제 이맘때 만진 것"의 차이가 눈에 보여야 한다.
+    /// 최근성 → 진하기. 4시간 반감기의 지수 곡선으로 방금/3시간/12시간/어제를
+    /// 눈으로 구분하되, 24시간 경계에서는 완전히 사라진다.
     static func recencyOpacity(age: TimeInterval, window: TimeInterval = RecentActivityScanner.dotWindow) -> Double? {
         guard age >= 0, age < window else { return nil }
-        let t = 1 - age / window
-        return 0.2 + 0.8 * t * t
+        let halfLife: TimeInterval = 4 * 3600
+        return 0.08 + 0.92 * pow(0.5, age / halfLife)
     }
 
     private var opacity: Double? {
@@ -165,22 +162,23 @@ struct WorkspaceActivityDot: View {
                     .frame(width: 6, height: 6)
                     .opacity(opacity)
 
-                if isWorking {
-                    Circle()
-                        .trim(from: 0, to: 0.72)
-                        .stroke(Color.warmPink.opacity(0.75),
-                                style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
-                        .frame(width: 12, height: 12)
-                        .rotationEffect(.degrees(spin ? 360 : 0))
-                        .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: spin)
-                        .onAppear { spin = true }
-                        .onDisappear { spin = false }
-                }
+            }
+
+            if isGenerating {
+                Circle()
+                    .trim(from: 0, to: 0.72)
+                    .stroke(Color.warmPink.opacity(0.75),
+                            style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
+                    .frame(width: 12, height: 12)
+                    .rotationEffect(.degrees(spin ? 360 : 0))
+                    .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: spin)
+                    .onAppear { spin = true }
+                    .onDisappear { spin = false }
             }
         }
         .frame(width: 14, height: 14)
         .animation(.easeInOut(duration: 0.4), value: opacity == nil)
-        .animation(.easeInOut(duration: 0.4), value: isWorking)
+        .animation(.easeInOut(duration: 0.4), value: isGenerating)
         .help(helpText)
     }
 
@@ -188,7 +186,7 @@ struct WorkspaceActivityDot: View {
         guard let lastConversation else { return "" }
         let minutes = Int(-lastConversation.timeIntervalSinceNow) / 60
         let when = minutes < 1 ? "방금" : minutes < 60 ? "\(minutes)분 전" : "\(minutes / 60)시간 전"
-        return isWorking ? "에이전트 작업 중 · 마지막 대화 \(when)" : "마지막 대화 \(when)"
+        return isGenerating ? "에이전트 응답 생성 중 · 마지막 대화 \(when)" : "마지막 대화 \(when)"
     }
 }
 
@@ -274,7 +272,7 @@ struct WorkspaceRow: View {
     let workspace: Workspace
     let isSelected: Bool
     var lastConversation: Date?
-    var isWorking: Bool = false
+    var isGenerating: Bool = false
     var onAddShellTab: (() -> Void)?
     var onAddTmuxTab: (() -> Void)?
     @State private var isHovering = false
@@ -305,7 +303,7 @@ struct WorkspaceRow: View {
 
             Spacer(minLength: 0)
 
-            WorkspaceActivityDot(lastConversation: lastConversation, isWorking: isWorking)
+            WorkspaceActivityDot(lastConversation: lastConversation, isGenerating: isGenerating)
 
             // 자리를 항상 확보하고 투명도로만 나타낸다 (호버 출렁임 방지)
             Menu {
