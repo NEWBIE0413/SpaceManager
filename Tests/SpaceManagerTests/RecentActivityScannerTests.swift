@@ -25,12 +25,17 @@ final class RecentActivityScannerTests: XCTestCase {
         return file
     }
 
+    private func scanNow(now: Date = Date()) -> RecentActivityScanner.ScanResult {
+        var cache: [String: String] = [:]
+        return RecentActivityScanner.scan(projectsDir: tempDir, cwdCache: &cache, now: now)
+    }
+
     func testScanFindsRecentSessionWithCwdAndSnippet() throws {
         _ = try writeTranscript(project: "-tmp-proj", session: "aaaa", lines: [
             #"{"type":"user","cwd":"/tmp/proj","message":{"content":"버그 고쳐줘"}}"#,
             #"{"type":"assistant","cwd":"/tmp/proj","message":{"content":[{"type":"text","text":"ok"}]}}"#,
         ])
-        let found = RecentActivityScanner.scan(projectsDir: tempDir)
+        let found = scanNow().sessions
         XCTAssertEqual(found.count, 1)
         XCTAssertEqual(found.first?.cwd, "/tmp/proj")
         XCTAssertEqual(found.first?.name, "proj")
@@ -42,7 +47,7 @@ final class RecentActivityScannerTests: XCTestCase {
         _ = try writeTranscript(project: "-tmp-old", session: "bbbb", lines: [
             #"{"type":"user","cwd":"/tmp/old","message":{"content":"오래된 작업"}}"#,
         ], mtime: Date().addingTimeInterval(-7200))
-        XCTAssertTrue(RecentActivityScanner.scan(projectsDir: tempDir).isEmpty)
+        XCTAssertTrue(scanNow().sessions.isEmpty)
     }
 
     // 도구 결과·커맨드 메타·caveat은 "무슨 작업이었는지"를 말해주지 않으므로
@@ -53,8 +58,39 @@ final class RecentActivityScannerTests: XCTestCase {
             #"{"type":"user","cwd":"/tmp/meta","message":{"content":"<command-name>/model</command-name>"}}"#,
             #"{"type":"user","cwd":"/tmp/meta","message":{"content":"Caveat: the messages below..."}}"#,
         ])
-        let found = RecentActivityScanner.scan(projectsDir: tempDir)
+        let found = scanNow().sessions
         XCTAssertEqual(found.first?.snippet, "진짜 요청")
+    }
+
+    // 아일랜드 창(1h) 밖이라도 점 창(24h) 안이면 cwd 활동 맵에는 잡혀야 한다
+    func testActivityMapCoversDotWindowBeyondIslandWindow() throws {
+        let now = Date()
+        _ = try writeTranscript(project: "-tmp-w", session: "dddd", lines: [
+            #"{"type":"user","cwd":"/tmp/w","message":{"content":"오전 작업"}}"#,
+        ], mtime: now.addingTimeInterval(-7200))
+        _ = try writeTranscript(project: "-tmp-ancient", session: "eeee", lines: [
+            #"{"type":"user","cwd":"/tmp/ancient","message":{"content":"지난주"}}"#,
+        ], mtime: now.addingTimeInterval(-90000))
+        let result = scanNow(now: now)
+        XCTAssertTrue(result.sessions.isEmpty)
+        XCTAssertNotNil(result.activityByCwd["/tmp/w"])
+        XCTAssertNil(result.activityByCwd["/tmp/ancient"], "24시간 지난 대화는 점에서 사라져야 한다")
+    }
+
+    // 같은 cwd의 세션 여러 개는 가장 최근 시각으로 접힌다
+    func testActivityMapKeepsNewestPerCwd() throws {
+        let now = Date()
+        _ = try writeTranscript(project: "-tmp-m", session: "f111", lines: [
+            #"{"type":"user","cwd":"/tmp/m","message":{"content":"a"}}"#,
+        ], mtime: now.addingTimeInterval(-600))
+        _ = try writeTranscript(project: "-tmp-m", session: "f222", lines: [
+            #"{"type":"user","cwd":"/tmp/m","message":{"content":"b"}}"#,
+        ], mtime: now.addingTimeInterval(-60))
+        let result = scanNow(now: now)
+        let recorded = result.activityByCwd["/tmp/m"]
+        XCTAssertNotNil(recorded)
+        XCTAssertEqual(recorded!.timeIntervalSince1970,
+                       now.addingTimeInterval(-60).timeIntervalSince1970, accuracy: 2)
     }
 
     func testScanSortsByRecencyAndCaps() throws {
@@ -64,7 +100,7 @@ final class RecentActivityScannerTests: XCTestCase {
                 "{\"type\":\"user\",\"cwd\":\"/tmp/p\(i)\",\"message\":{\"content\":\"작업 \(i)\"}}",
             ], mtime: now.addingTimeInterval(TimeInterval(-i * 60)))
         }
-        let found = RecentActivityScanner.scan(projectsDir: tempDir, now: now)
+        let found = scanNow(now: now).sessions
         XCTAssertEqual(found.count, RecentActivityScanner.maxSessions)
         XCTAssertEqual(found.first?.name, "p0")
         XCTAssertEqual(found.first.map(\.lastActivity), found.map(\.lastActivity).max())

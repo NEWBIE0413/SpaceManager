@@ -5,7 +5,7 @@ import AppKit
 /// 창마다 하나씩 생성된다 — AppState가 여기 살아야 창별 독립 선택이 가능하다.
 struct ContentView: View {
     @StateObject private var appState = AppState()
-    @StateObject private var activityScanner = RecentActivityScanner()
+    @ObservedObject private var activityScanner = RecentActivityScanner.shared
     @StateObject private var islandHover = IslandHoverState()
     @Environment(\.openWindow) private var openWindow
 
@@ -80,11 +80,8 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            activityScanner.start()
+            RecentActivityScanner.shared.start()
             WindowRestorer.openRemainingWindowsIfNeeded(openWindow)
-        }
-        .onDisappear {
-            activityScanner.stop()
         }
     }
 

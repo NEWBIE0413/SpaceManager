@@ -130,6 +130,16 @@ enum TmuxBootstrap {
 
     static var isTmuxAvailable: Bool { tmuxPath != nil }
 
+    /// 세션이 이 워크스페이스 소속인지 — 메인 세션(base) 또는 추가 탭(base-2, base-3…).
+    /// 단순 prefix 매칭이 아닌 이유: 워크스페이스 "flat"의 prefix 검사는
+    /// 별개 워크스페이스 "flat-web"의 세션까지 집어삼킨다. 숫자 접미사만 소속이다.
+    static func sessionBelongs(session: String, base: String) -> Bool {
+        if session == base { return true }
+        guard session.hasPrefix(base + "-") else { return false }
+        let suffix = session.dropFirst(base.count + 1)
+        return !suffix.isEmpty && suffix.allSatisfy(\.isNumber)
+    }
+
     /// 콜드부트 가드 창 안인지 — 이 동안엔 부트스트랩 외의 어떤 tmux 명령도 삼가야 한다.
     /// (폴링·테마 동기화 등이 이 창에 tmux 프로세스를 띄우면 continuum 가드가
     /// 다중 서버로 오판해 세션 복원·자동 저장을 포기한다. 2026-07-19 사고의 원인.)

@@ -14,17 +14,35 @@ struct RecentClaudeSession: Identifiable, Equatable {
 /// transcript는 메시지가 오갈 때마다 append되므로 mtime이 곧 마지막 상호작용 시각이다.
 /// 프로세스 목록이 아니라 파일 mtime을 보는 이유: 떠 있기만 하고 대화가 없는 세션은
 /// "최근 작업"이 아니고, 반대로 CLI를 껐어도 방금까지 대화했다면 최근 작업이 맞다.
+///
+/// 한 번의 스캔이 두 소비자를 먹인다:
+/// - 아일랜드: 지난 1시간, 상위 8개, 스니펫 포함
+/// - 사이드바 활동 점: 지난 24시간, cwd별 마지막 대화 시각 (진하기 계산용)
 final class RecentActivityScanner: ObservableObject {
-    @Published private(set) var sessions: [RecentClaudeSession] = []
+    /// 모든 창이 같은 데이터를 보므로 하나만 돈다
+    static let shared = RecentActivityScanner()
 
-    /// "최근"의 정의 — 지난 1시간
-    static let activityWindow: TimeInterval = 3600
+    @Published private(set) var sessions: [RecentClaudeSession] = []
+    /// cwd → 마지막 대화 시각 (24시간 창)
+    @Published private(set) var workspaceActivity: [String: Date] = [:]
+
+    /// 아일랜드의 "최근" — 지난 1시간
+    static let islandWindow: TimeInterval = 3600
+    /// 사이드바 점의 "최근" — 지난 24시간
+    static let dotWindow: TimeInterval = 86400
     /// 아일랜드가 소음이 되지 않도록 표시 개수 제한
     static let maxSessions = 8
+
+    struct ScanResult: Equatable {
+        var sessions: [RecentClaudeSession] = []
+        var activityByCwd: [String: Date] = [:]
+    }
 
     private let projectsDir: URL
     private var timer: Timer?
     private let queue = DispatchQueue(label: "SpaceManager.RecentActivity", qos: .utility)
+    /// transcript 파일의 cwd는 불변이므로 한 번 읽으면 캐시한다 (queue 위에서만 접근)
+    private var cwdCache: [String: String] = [:]
 
     init(projectsDir: URL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".claude/projects")) {
@@ -32,6 +50,7 @@ final class RecentActivityScanner: ObservableObject {
     }
 
     func start() {
+        guard timer == nil else { return }
         rescan()
         timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.rescan()
@@ -46,38 +65,56 @@ final class RecentActivityScanner: ObservableObject {
     func rescan() {
         let dir = projectsDir
         queue.async { [weak self] in
-            let found = Self.scan(projectsDir: dir)
+            guard let self else { return }
+            let result = Self.scan(projectsDir: dir, cwdCache: &self.cwdCache)
             DispatchQueue.main.async {
-                guard let self, self.sessions != found else { return }
-                self.sessions = found
+                if self.sessions != result.sessions { self.sessions = result.sessions }
+                if self.workspaceActivity != result.activityByCwd { self.workspaceActivity = result.activityByCwd }
             }
         }
     }
 
     // MARK: - 스캔
 
-    static func scan(projectsDir: URL, now: Date = Date()) -> [RecentClaudeSession] {
+    static func scan(projectsDir: URL, cwdCache: inout [String: String], now: Date = Date()) -> ScanResult {
         let fm = FileManager.default
         guard let projectDirs = try? fm.contentsOfDirectory(
             at: projectsDir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
-        ) else { return [] }
+        ) else { return ScanResult() }
 
         var recent: [(url: URL, mtime: Date)] = []
-        let cutoff = now.addingTimeInterval(-activityWindow)
+        let dotCutoff = now.addingTimeInterval(-dotWindow)
         for dir in projectDirs {
             guard let files = try? fm.contentsOfDirectory(
                 at: dir, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles]
             ) else { continue }
             for file in files where file.pathExtension == "jsonl" {
                 guard let mtime = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
-                      mtime > cutoff else { continue }
+                      mtime > dotCutoff else { continue }
                 recent.append((file, mtime))
             }
         }
 
-        // tail 파싱은 활성 파일에만 — 전체 스캔은 stat뿐이라 싸다
-        let top = recent.sorted { $0.mtime > $1.mtime }.prefix(maxSessions)
-        return top.compactMap { entry in
+        var result = ScanResult()
+
+        // 24시간 창: cwd별 마지막 대화 시각. cwd는 캐시 우선, 처음 보는 파일만 tail 파싱
+        for entry in recent {
+            let key = entry.url.path
+            let cwd: String?
+            if let cached = cwdCache[key] {
+                cwd = cached
+            } else {
+                cwd = parseTail(of: entry.url).cwd
+                if let cwd { cwdCache[key] = cwd }
+            }
+            guard let cwd else { continue }
+            result.activityByCwd[cwd] = max(result.activityByCwd[cwd] ?? .distantPast, entry.mtime)
+        }
+
+        // 1시간 창 상위 8개만 스니펫까지 파싱 (아일랜드)
+        let islandCutoff = now.addingTimeInterval(-islandWindow)
+        let top = recent.filter { $0.mtime > islandCutoff }.sorted { $0.mtime > $1.mtime }.prefix(maxSessions)
+        result.sessions = top.compactMap { entry in
             let parsed = parseTail(of: entry.url)
             guard let cwd = parsed.cwd else { return nil }
             let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -90,6 +127,7 @@ final class RecentActivityScanner: ObservableObject {
                 snippet: parsed.snippet
             )
         }
+        return result
     }
 
     /// transcript 끝부분에서 cwd와 마지막 유저 메시지를 뽑는다.

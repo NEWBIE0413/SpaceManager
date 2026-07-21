@@ -5,8 +5,25 @@ import UniformTypeIdentifiers
 struct WorkspaceListView: View {
     @EnvironmentObject var appState: AppState
     @ObservedObject private var agentMonitor = TmuxAgentMonitor.shared
+    @ObservedObject private var activity = RecentActivityScanner.shared
     @State private var isHoveringHeader = false
     @State private var draggingWorkspace: Workspace?
+
+    /// 이 워크스페이스(루트 및 하위 경로)에서의 마지막 Claude 대화 시각
+    private func lastConversation(for workspace: Workspace) -> Date? {
+        activity.workspaceActivity
+            .filter { $0.key == workspace.rootPath || $0.key.hasPrefix(workspace.rootPath + "/") }
+            .map(\.value)
+            .max()
+    }
+
+    /// 이 워크스페이스의 tmux 세션(base 또는 base-N)에 지금 출력 중인 에이전트가 있는지
+    private func isWorking(_ workspace: Workspace) -> Bool {
+        let base = workspace.effectiveTmuxSessionName
+        return agentMonitor.states.contains { session, state in
+            state == .working && TmuxBootstrap.sessionBelongs(session: session, base: base)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -35,7 +52,8 @@ struct WorkspaceListView: View {
                     WorkspaceRow(
                         workspace: workspace,
                         isSelected: appState.selectedWorkspace?.id == workspace.id,
-                        agentState: agentMonitor.states[workspace.effectiveTmuxSessionName],
+                        lastConversation: lastConversation(for: workspace),
+                        isWorking: isWorking(workspace),
                         onAddShellTab: { appState.selectWorkspace(workspace); appState.addShellTab() },
                         onAddTmuxTab: { appState.selectWorkspace(workspace); appState.addTmuxTab() }
                     )
@@ -115,33 +133,62 @@ struct WorkspaceListView: View {
     }
 }
 
-/// 워크스페이스 행의 에이전트 상태 점.
+/// 워크스페이스 행의 활동 점.
 ///
-/// 주의가 필요한 쪽이 또렷해야 한다: "답변 대기"가 warmPink 솔리드로 정지해 있고,
-/// "작업 중"은 저채도로 느리게 숨쉰다 — 돌아가는 중인 건 눈길을 끌 이유가 없다.
-/// 자리는 항상 확보해 상태가 오가도 행이 밀리지 않고, 전환은 크로스페이드만.
-struct AgentStateDot: View {
-    let state: AgentState?
-    @State private var breathe = false
+/// 점의 진하기 = 마지막 Claude 대화의 최근성. 방금 대화했으면 선명한 warmPink,
+/// 시간이 지날수록 흐려지다 24시간이 지나면 사라진다 — 사이드바만 훑어도
+/// "요즘 만지는 워크스페이스"가 도드라진다. 에이전트가 지금 출력을 만드는 중이면
+/// 점 둘레에 스피너가 돈다. 자리는 항상 확보해 상태가 오가도 행이 밀리지 않는다.
+struct WorkspaceActivityDot: View {
+    let lastConversation: Date?
+    let isWorking: Bool
+    @State private var spin = false
+
+    /// 최근성 → 진하기. 초반엔 천천히, 끝으로 갈수록 빨리 흐려지는 제곱 곡선 —
+    /// "오늘 아침에 만진 것"과 "어제 이맘때 만진 것"의 차이가 눈에 보여야 한다.
+    static func recencyOpacity(age: TimeInterval, window: TimeInterval = RecentActivityScanner.dotWindow) -> Double? {
+        guard age >= 0, age < window else { return nil }
+        let t = 1 - age / window
+        return 0.2 + 0.8 * t * t
+    }
+
+    private var opacity: Double? {
+        guard let lastConversation else { return nil }
+        return Self.recencyOpacity(age: -lastConversation.timeIntervalSinceNow)
+    }
 
     var body: some View {
         ZStack {
-            if let state {
+            if let opacity {
                 Circle()
                     .fill(Color.warmPink)
                     .frame(width: 6, height: 6)
-                    .opacity(state == .waiting ? 1 : (breathe ? 0.25 : 0.55))
+                    .opacity(opacity)
+
+                if isWorking {
+                    Circle()
+                        .trim(from: 0, to: 0.72)
+                        .stroke(Color.warmPink.opacity(0.75),
+                                style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
+                        .frame(width: 12, height: 12)
+                        .rotationEffect(.degrees(spin ? 360 : 0))
+                        .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: spin)
+                        .onAppear { spin = true }
+                        .onDisappear { spin = false }
+                }
             }
         }
-        .frame(width: 10, height: 10)
-        .animation(.easeInOut(duration: 0.4), value: state)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
-                breathe = true
-            }
-        }
-        .help(state == .waiting ? "에이전트가 답변을 기다리는 중"
-              : state == .working ? "에이전트 작업 중" : "")
+        .frame(width: 14, height: 14)
+        .animation(.easeInOut(duration: 0.4), value: opacity == nil)
+        .animation(.easeInOut(duration: 0.4), value: isWorking)
+        .help(helpText)
+    }
+
+    private var helpText: String {
+        guard let lastConversation else { return "" }
+        let minutes = Int(-lastConversation.timeIntervalSinceNow) / 60
+        let when = minutes < 1 ? "방금" : minutes < 60 ? "\(minutes)분 전" : "\(minutes / 60)시간 전"
+        return isWorking ? "에이전트 작업 중 · 마지막 대화 \(when)" : "마지막 대화 \(when)"
     }
 }
 
@@ -226,7 +273,8 @@ private struct WorkspaceDropDelegate: DropDelegate {
 struct WorkspaceRow: View {
     let workspace: Workspace
     let isSelected: Bool
-    var agentState: AgentState?
+    var lastConversation: Date?
+    var isWorking: Bool = false
     var onAddShellTab: (() -> Void)?
     var onAddTmuxTab: (() -> Void)?
     @State private var isHovering = false
@@ -257,7 +305,7 @@ struct WorkspaceRow: View {
 
             Spacer(minLength: 0)
 
-            AgentStateDot(state: agentState)
+            WorkspaceActivityDot(lastConversation: lastConversation, isWorking: isWorking)
 
             // 자리를 항상 확보하고 투명도로만 나타낸다 (호버 출렁임 방지)
             Menu {

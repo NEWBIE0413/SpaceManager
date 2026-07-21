@@ -56,6 +56,19 @@ final class TmuxBootstrapTests: XCTestCase {
         XCTAssertEqual(TmuxBootstrap.startupRole(socketExists: false, coldBootAt: t0, now: t0.addingTimeInterval(20)), .coldBirther)
     }
 
+    // MARK: - 세션 소속 판정
+
+    // "flat"의 소속은 flat, flat-2, flat-15 — 별개 워크스페이스 "flat-web"의
+    // 세션을 집어삼키면 안 된다
+    func testSessionBelongsMatchesBaseAndNumericSuffixOnly() {
+        XCTAssertTrue(TmuxBootstrap.sessionBelongs(session: "flat", base: "flat"))
+        XCTAssertTrue(TmuxBootstrap.sessionBelongs(session: "flat-2", base: "flat"))
+        XCTAssertTrue(TmuxBootstrap.sessionBelongs(session: "flat-15", base: "flat"))
+        XCTAssertFalse(TmuxBootstrap.sessionBelongs(session: "flat-web", base: "flat"))
+        XCTAssertFalse(TmuxBootstrap.sessionBelongs(session: "flatten", base: "flat"))
+        XCTAssertFalse(TmuxBootstrap.sessionBelongs(session: "flat-", base: "flat"))
+    }
+
     // MARK: - 콜드 부트 스크립트
 
     func testColdBirtherScriptBirthsAndCleansBootSession() {
