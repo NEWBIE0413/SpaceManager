@@ -21,6 +21,11 @@ class AppState: ObservableObject {
     @Published var showNewWorkspaceSheet = false
     @Published var showAddProjectSheet = false
 
+    /// 창별 라이트/다크 — 전역(NSApp)이 아니라 이 창의 NSWindow.appearance에 적용된다.
+    /// 레거시 전역 선택(UserDefaults)을 새 창의 기본값으로 승계한다.
+    @Published var preferredAppearance: String =
+        UserDefaults.standard.string(forKey: "preferredAppearance") ?? "system"
+
     init() {
         // windowStateId(let)를 모든 분기에서 먼저 확정해야 한다 — self.storage 접근(구독 설정)은
         // 저장 프로퍼티가 전부 초기화된 뒤에만 허용되므로, claim 판단을 그보다 앞에 끝낸다.
@@ -58,6 +63,9 @@ class AppState: ObservableObject {
     private func restore(from state: WindowState) {
         // 레거시 상태(workspaces 없음)는 전역 목록에서 1회 이관
         workspaces = state.workspaces ?? storage.workspaces
+        if let appearance = state.appearance {
+            preferredAppearance = appearance
+        }
         let workspaceIds = Set(workspaces.map(\.id))
         for wsTabs in state.workspaceTabs where workspaceIds.contains(wsTabs.workspaceId) {
             let restored = wsTabs.tabs.map { TerminalSession(snapshot: $0) }
@@ -88,8 +96,14 @@ class AppState: ObservableObject {
             id: windowStateId,
             selectedWorkspaceId: selectedWorkspace?.id,
             workspaces: workspaces,
-            workspaceTabs: wsStates
+            workspaceTabs: wsStates,
+            appearance: preferredAppearance
         ))
+    }
+
+    func setAppearance(_ raw: String) {
+        preferredAppearance = raw
+        persistWindowState()
     }
 
     // MARK: - Workspace Management

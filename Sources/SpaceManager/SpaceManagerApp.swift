@@ -9,7 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        AppearanceManager.applySaved()
+        // 라이트/다크는 창별(AppState.preferredAppearance → NSWindow.appearance) —
+        // 전역 NSApp.appearance는 건드리지 않는다
     }
 
     func applicationWillBecomeActive(_ notification: Notification) {

@@ -76,7 +76,7 @@ enum TmuxBootstrap {
     private static var coldBootAt: Date?
 
     /// tmux 기본 소켓 존재 여부 (서버 생존의 근사치 — 즉시 반환, 프로세스 스폰 없음)
-    private static var serverSocketExists: Bool {
+    static var serverSocketExists: Bool {
         let tmpDir = ProcessInfo.processInfo.environment["TMUX_TMPDIR"] ?? "/tmp"
         return FileManager.default.fileExists(atPath: "\(tmpDir)/tmux-\(getuid())/default")
     }
@@ -106,27 +106,37 @@ enum TmuxBootstrap {
         """
     }
 
-    /// tmux 존재 여부. 첫 접근 시 1회 평가 후 캐시.
+    /// tmux 바이너리 경로. 첫 접근 시 1회 평가 후 캐시.
     ///
     /// 파일 시스템 검사만 사용한다 — 이전 구현(로그인 셸 스폰 + waitUntilExit)은
     /// 메인 스레드에서 첫 평가될 때 waitUntilExit이 런루프를 재진입 펌핑해
     /// SwiftUI가 같은 static let을 다시 터치 → dispatch_once 재귀 → 크래시했다.
     /// 파일 검사는 즉시 반환이라 그 문제 클래스 자체가 없다.
-    static let isTmuxAvailable: Bool = {
+    static let tmuxPath: String? = {
         let candidates = [
             "/opt/homebrew/bin/tmux",   // Apple Silicon homebrew
             "/usr/local/bin/tmux",      // Intel homebrew
             "/usr/bin/tmux",
         ]
-        if candidates.contains(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
-            return true
+        if let found = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            return found
         }
         // PATH 폴백 (GUI 앱의 PATH는 제한적이지만 위 후보가 대부분을 커버)
         let path = ProcessInfo.processInfo.environment["PATH"] ?? ""
-        return path.split(separator: ":").contains {
-            FileManager.default.isExecutableFile(atPath: "\($0)/tmux")
-        }
+        return path.split(separator: ":")
+            .map { "\($0)/tmux" }
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
     }()
+
+    static var isTmuxAvailable: Bool { tmuxPath != nil }
+
+    /// 콜드부트 가드 창 안인지 — 이 동안엔 부트스트랩 외의 어떤 tmux 명령도 삼가야 한다.
+    /// (폴링·테마 동기화 등이 이 창에 tmux 프로세스를 띄우면 continuum 가드가
+    /// 다중 서버로 오판해 세션 복원·자동 저장을 포기한다. 2026-07-19 사고의 원인.)
+    static var isInColdBootWindow: Bool {
+        guard let t = coldBootAt else { return false }
+        return Date().timeIntervalSince(t) < coldBootWindowSeconds
+    }
 }
 
 extension String {

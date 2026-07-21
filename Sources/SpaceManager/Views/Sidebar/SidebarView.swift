@@ -1,6 +1,9 @@
 import SwiftUI
 
-/// Left sidebar containing workspaces and projects
+/// Left sidebar containing workspaces and projects.
+/// 라이트 모드에서도 딥 다크를 유지한다 — 아일랜드의 "완전 다크"를 패널로 연장한
+/// 디자인 결정. 컬러스킴을 다크로 고정하면 .primary/.secondary/선택 배경이 전부
+/// 다크 기준으로 풀리므로 개별 색을 손볼 필요가 없다.
 struct SidebarView: View {
     @EnvironmentObject var appState: AppState
 
@@ -21,5 +24,7 @@ struct SidebarView: View {
             Spacer()
         }
         .frame(maxHeight: .infinity)
+        .background(Color.panelDark.ignoresSafeArea())
+        .environment(\.colorScheme, .dark)
     }
 }

@@ -6,6 +6,9 @@ extension Color {
     static let warmPink = Color(red: 0.95, green: 0.45, blue: 0.50)
     /// Slightly muted warm pink for section headers
     static let warmPinkMuted = Color(red: 0.78, green: 0.48, blue: 0.50)
+    /// 아일랜드·사이드바가 공유하는 딥 다크 — 라이트 모드에서도 좌측 패널은
+    /// 이 톤을 유지한다 (아일랜드의 "완전 다크"를 패널로 연장한 디자인 결정)
+    static let panelDark = Color(white: 0.07)
 }
 
 /// 사이드바 공통 룩 — 행 높이·아이콘 크기·라운딩을 한 곳에서 통일한다.
@@ -45,18 +48,52 @@ struct SidebarSectionHeader<Trailing: View>: View {
     }
 }
 
-/// 라이트/다크 오버라이드 — NSApp.appearance를 바꾸면 SwiftUI 색상과
-/// 터미널 테마(viewDidChangeEffectiveAppearance)가 전부 자동 추종한다.
+/// 라이트/다크는 창별이다 — NSApp(전역)이 아니라 각 창의 NSWindow.appearance에
+/// 적용한다. 창의 서브뷰(터미널 WKWebView 포함)는 effectiveAppearance를 상속하므로
+/// 터미널 테마(viewDidChangeEffectiveAppearance)도 창 단위로 자동 추종한다.
 enum AppearanceManager {
-    static func apply(_ raw: String) {
+    static func apply(_ raw: String, to window: NSWindow) {
         switch raw {
-        case "light": NSApp.appearance = NSAppearance(named: .aqua)
-        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
-        default: NSApp.appearance = nil   // 시스템 추종
+        case "light": window.appearance = NSAppearance(named: .aqua)
+        case "dark": window.appearance = NSAppearance(named: .darkAqua)
+        default: window.appearance = nil   // 시스템 추종
         }
     }
 
-    static func applySaved() {
-        apply(UserDefaults.standard.string(forKey: "preferredAppearance") ?? "system")
+    /// 앱 무드를 tmux 상태바까지 연장한다 (~/.smux/bin/smux-theme).
+    ///
+    /// 라이트로 갈 때만 soft를 호출한다 — 문제의 본질이 "화이트 크롬 위의 솔리드
+    /// pill 충돌"이고, 다크에서의 취향은 유저마다 갈리는 영역이라(현재 SEOL은
+    /// 다크에서도 soft 선호) 다크 전환 시 강제로 pill을 씌우면 취향과 싸우는
+    /// 동기화가 된다. 다크에서 pill을 원하게 되면 호출부에 else 분기로 dark 추가.
+    /// tmux 상태바는 전역이므로, 유저가 마지막으로 토글한 창의 무드를 따른다.
+    static func syncTmuxThemeToSoft() {
+        // 콜드부트 창에는 어떤 tmux 명령도 금지 (continuum 가드 오판 방지)
+        guard TmuxBootstrap.serverSocketExists, !TmuxBootstrap.isInColdBootWindow else { return }
+        let switcher = NSHomeDirectory() + "/.smux/bin/smux-theme"
+        guard FileManager.default.isExecutableFile(atPath: switcher) else { return }
+        DispatchQueue.global(qos: .utility).async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: switcher)
+            process.arguments = ["soft"]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try? process.run()   // best-effort — 실패해도 앱 테마 전환은 이미 완료
+        }
+    }
+}
+
+/// SwiftUI 뷰가 자기 NSWindow에 접근하기 위한 브릿지 (창별 테마 적용용)
+struct WindowAccessor: NSViewRepresentable {
+    let onWindow: (NSWindow) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { if let window = view.window { onWindow(window) } }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async { if let window = view.window { onWindow(window) } }
     }
 }

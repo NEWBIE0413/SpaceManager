@@ -5,11 +5,13 @@ import AppKit
 /// 창마다 하나씩 생성된다 — AppState가 여기 살아야 창별 독립 선택이 가능하다.
 struct ContentView: View {
     @StateObject private var appState = AppState()
+    @StateObject private var activityScanner = RecentActivityScanner()
+    @StateObject private var islandHover = IslandHoverState()
     @Environment(\.openWindow) private var openWindow
-    @AppStorage("preferredAppearance") private var preferredAppearance = "system"
+    @State private var window: NSWindow?
 
     private var isDarkNow: Bool {
-        switch preferredAppearance {
+        switch appState.preferredAppearance {
         case "light": return false
         case "dark": return true
         default:
@@ -23,13 +25,28 @@ struct ContentView: View {
                 .frame(minWidth: 200)
         } detail: {
             TerminalAreaView()
-                .overlay(alignment: .top) {
-                    ActivityIslandView()
-                        .padding(.top, 10)
-                }
+        }
+        // 확장 패널은 창 전체 기준 상단 중앙 — 타이틀바의 필에서 내려오는 노치 연출
+        .overlay(alignment: .top) {
+            IslandPanelView(scanner: activityScanner, hover: islandHover)
+                .padding(.top, 4)
         }
         .environmentObject(appState)
         .focusedSceneObject(appState)
+        // 창별 라이트/다크 — 이 창의 NSWindow에만 적용된다
+        .background(WindowAccessor { win in
+            window = win
+            AppearanceManager.apply(appState.preferredAppearance, to: win)
+        })
+        .onChange(of: appState.preferredAppearance) {
+            if let window {
+                AppearanceManager.apply(appState.preferredAppearance, to: window)
+            }
+            // tmux 상태바는 전역 — 마지막으로 토글된 창의 무드를 따른다 (라이트→soft)
+            if appState.preferredAppearance == "light" {
+                AppearanceManager.syncTmuxThemeToSoft()
+            }
+        }
         .sheet(isPresented: $appState.showNewWorkspaceSheet) {
             NewWorkspaceSheet()
                 .environmentObject(appState)
@@ -40,10 +57,12 @@ struct ContentView: View {
         }
         .navigationTitle(appState.selectedWorkspace?.name ?? "SpaceManager")
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                IslandPillView(scanner: activityScanner, hover: islandHover)
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    preferredAppearance = isDarkNow ? "light" : "dark"
-                    AppearanceManager.apply(preferredAppearance)
+                    appState.setAppearance(isDarkNow ? "light" : "dark")
                 } label: {
                     Image(systemName: isDarkNow ? "sun.max" : "moon")
                 }
@@ -51,7 +70,11 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            activityScanner.start()
             WindowRestorer.openRemainingWindowsIfNeeded(openWindow)
+        }
+        .onDisappear {
+            activityScanner.stop()
         }
     }
 }

@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 /// List of workspaces in the sidebar
 struct WorkspaceListView: View {
     @EnvironmentObject var appState: AppState
+    @ObservedObject private var agentMonitor = TmuxAgentMonitor.shared
     @State private var isHoveringHeader = false
     @State private var draggingWorkspace: Workspace?
 
@@ -34,6 +35,7 @@ struct WorkspaceListView: View {
                     WorkspaceRow(
                         workspace: workspace,
                         isSelected: appState.selectedWorkspace?.id == workspace.id,
+                        agentState: agentMonitor.states[workspace.effectiveTmuxSessionName],
                         onAddShellTab: { appState.selectWorkspace(workspace); appState.addShellTab() },
                         onAddTmuxTab: { appState.selectWorkspace(workspace); appState.addTmuxTab() }
                     )
@@ -109,6 +111,37 @@ struct WorkspaceListView: View {
                 .padding(.horizontal, 8)
             }
         }
+        .onAppear { TmuxAgentMonitor.shared.start() }
+    }
+}
+
+/// 워크스페이스 행의 에이전트 상태 점.
+///
+/// 주의가 필요한 쪽이 또렷해야 한다: "답변 대기"가 warmPink 솔리드로 정지해 있고,
+/// "작업 중"은 저채도로 느리게 숨쉰다 — 돌아가는 중인 건 눈길을 끌 이유가 없다.
+/// 자리는 항상 확보해 상태가 오가도 행이 밀리지 않고, 전환은 크로스페이드만.
+struct AgentStateDot: View {
+    let state: AgentState?
+    @State private var breathe = false
+
+    var body: some View {
+        ZStack {
+            if let state {
+                Circle()
+                    .fill(Color.warmPink)
+                    .frame(width: 6, height: 6)
+                    .opacity(state == .waiting ? 1 : (breathe ? 0.25 : 0.55))
+            }
+        }
+        .frame(width: 10, height: 10)
+        .animation(.easeInOut(duration: 0.4), value: state)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+                breathe = true
+            }
+        }
+        .help(state == .waiting ? "에이전트가 답변을 기다리는 중"
+              : state == .working ? "에이전트 작업 중" : "")
     }
 }
 
@@ -193,6 +226,7 @@ private struct WorkspaceDropDelegate: DropDelegate {
 struct WorkspaceRow: View {
     let workspace: Workspace
     let isSelected: Bool
+    var agentState: AgentState?
     var onAddShellTab: (() -> Void)?
     var onAddTmuxTab: (() -> Void)?
     @State private var isHovering = false
@@ -222,6 +256,8 @@ struct WorkspaceRow: View {
             }
 
             Spacer(minLength: 0)
+
+            AgentStateDot(state: agentState)
 
             // 자리를 항상 확보하고 투명도로만 나타낸다 (호버 출렁임 방지)
             Menu {
