@@ -71,6 +71,7 @@
 
     var composing = false;
     var pending = '';
+    var suppressDiffUntil = 0;
 
     function positionPreview() {
       var v = core._compositionView;
@@ -107,15 +108,26 @@
       composing = false;
       pending = '';
       hidePreview();
+      // WKWebView는 compositionend를 주지 않으므로 커밋된 음절이 textarea에
+      // 계속 남는다. 이 잔여물을 CompositionHelper의 지연(setTimeout) diff 경로가
+      // 주워서 같은 음절을 한 번 더 보내면 "글글짜" 식 이중 입력이 된다 — 이벤트
+      // 타이밍에 따라 간헐 발생. 커밋 시점에 잔여물과 diff 기준점을 함께 비우고,
+      // 이미 예약된 지연 diff가 소진될 시간 동안 diff 경로를 잠시 막는다.
+      suppressDiffUntil = performance.now() + 80;
+      if (core.textarea) { core.textarea.value = ''; }
+      if (ch) { ch._dataAlreadySent = ''; }
       if (text) { core.coreService.triggerDataEvent(text, true); }
     }
 
     // keyCode 229 keydown마다 textarea 변경분을 자모 단위로 흘려보내는
-    // CompositionHelper 경로를 조합 중에는 차단한다
+    // CompositionHelper 경로를 조합 중 + 커밋 직후 잠깐 차단한다
+    // (커밋 직후 창은 위 flush 주석의 이중 입력 방지)
     var ch = core._compositionHelper;
     if (ch && typeof ch._handleAnyTextareaChanges === 'function') {
       var origChanges = ch._handleAnyTextareaChanges.bind(ch);
-      ch._handleAnyTextareaChanges = function () { if (!composing) { origChanges(); } };
+      ch._handleAnyTextareaChanges = function () {
+        if (!composing && performance.now() >= suppressDiffUntil) { origChanges(); }
+      };
     }
 
     var origInputEvent = core._inputEvent.bind(core);

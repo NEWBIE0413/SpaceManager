@@ -62,7 +62,7 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
             ? workingDirectory : NSHomeDirectory()
         let arguments: [String]
         if let sessionName = tmuxSessionName {
-            arguments = ["-lc", TmuxBootstrap.attachOrCreateScript(sessionName: sessionName, workingDirectory: startDir)]
+            arguments = ["-lc", TmuxBootstrap.startupScript(sessionName: sessionName, workingDirectory: startDir)]
         } else {
             arguments = []   // 순수 인터랙티브 로그인 셸
         }
