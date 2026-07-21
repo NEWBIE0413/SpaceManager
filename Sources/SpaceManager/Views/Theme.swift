@@ -48,18 +48,9 @@ struct SidebarSectionHeader<Trailing: View>: View {
     }
 }
 
-/// 라이트/다크는 창별이다 — NSApp(전역)이 아니라 각 창의 NSWindow.appearance에
-/// 적용한다. 창의 서브뷰(터미널 WKWebView 포함)는 effectiveAppearance를 상속하므로
-/// 터미널 테마(viewDidChangeEffectiveAppearance)도 창 단위로 자동 추종한다.
+/// 라이트/다크는 창별이다 — ContentView의 preferredColorScheme이 창(씬) 단위로
+/// 적용한다. 여기는 tmux 쪽 연동만 남는다.
 enum AppearanceManager {
-    static func apply(_ raw: String, to window: NSWindow) {
-        switch raw {
-        case "light": window.appearance = NSAppearance(named: .aqua)
-        case "dark": window.appearance = NSAppearance(named: .darkAqua)
-        default: window.appearance = nil   // 시스템 추종
-        }
-    }
-
     /// 앱 무드를 tmux 상태바까지 연장한다 (~/.smux/bin/smux-theme).
     ///
     /// 라이트로 갈 때만 soft를 호출한다 — 문제의 본질이 "화이트 크롬 위의 솔리드
@@ -80,20 +71,5 @@ enum AppearanceManager {
             process.standardError = FileHandle.nullDevice
             try? process.run()   // best-effort — 실패해도 앱 테마 전환은 이미 완료
         }
-    }
-}
-
-/// SwiftUI 뷰가 자기 NSWindow에 접근하기 위한 브릿지 (창별 테마 적용용)
-struct WindowAccessor: NSViewRepresentable {
-    let onWindow: (NSWindow) -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async { if let window = view.window { onWindow(window) } }
-        return view
-    }
-
-    func updateNSView(_ view: NSView, context: Context) {
-        DispatchQueue.main.async { if let window = view.window { onWindow(window) } }
     }
 }

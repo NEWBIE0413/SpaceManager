@@ -8,7 +8,6 @@ struct ContentView: View {
     @StateObject private var activityScanner = RecentActivityScanner()
     @StateObject private var islandHover = IslandHoverState()
     @Environment(\.openWindow) private var openWindow
-    @State private var window: NSWindow?
 
     private var isDarkNow: Bool {
         switch appState.preferredAppearance {
@@ -16,6 +15,16 @@ struct ContentView: View {
         case "dark": return true
         default:
             return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        }
+    }
+
+    /// 창별 라이트/다크 — preferredColorScheme은 이 창(씬) 전체에 적용된다
+    /// (타이틀바 텍스트·툴바·시트 포함). nil이면 시스템 추종.
+    private var preferredScheme: ColorScheme? {
+        switch appState.preferredAppearance {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
         }
     }
 
@@ -33,15 +42,8 @@ struct ContentView: View {
         }
         .environmentObject(appState)
         .focusedSceneObject(appState)
-        // 창별 라이트/다크 — 이 창의 NSWindow에만 적용된다
-        .background(WindowAccessor { win in
-            window = win
-            AppearanceManager.apply(appState.preferredAppearance, to: win)
-        })
+        .preferredColorScheme(preferredScheme)
         .onChange(of: appState.preferredAppearance) {
-            if let window {
-                AppearanceManager.apply(appState.preferredAppearance, to: window)
-            }
             // tmux 상태바는 전역 — 마지막으로 토글된 창의 무드를 따른다 (라이트→soft)
             if appState.preferredAppearance == "light" {
                 AppearanceManager.syncTmuxThemeToSoft()
@@ -57,16 +59,24 @@ struct ContentView: View {
         }
         .navigationTitle(appState.selectedWorkspace?.name ?? "SpaceManager")
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                IslandPillView(scanner: activityScanner, hover: islandHover)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    appState.setAppearance(isDarkNow ? "light" : "dark")
-                } label: {
-                    Image(systemName: isDarkNow ? "sun.max" : "moon")
+            // macOS 26+ 툴바는 커스텀 아이템 뒤에 glass 캡슐을 자동으로 깔아준다 —
+            // 검은 아일랜드 필이 흰 캡슐 안에 갇히므로 공유 배경을 숨긴다
+            if #available(macOS 26.0, *) {
+                ToolbarItem(placement: .principal) {
+                    IslandPillView(scanner: activityScanner, hover: islandHover)
                 }
-                .help(isDarkNow ? "라이트 모드로 전환" : "다크 모드로 전환")
+                .sharedBackgroundVisibility(.hidden)
+                ToolbarItem(placement: .primaryAction) {
+                    themeToggleButton
+                }
+                .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .principal) {
+                    IslandPillView(scanner: activityScanner, hover: islandHover)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    themeToggleButton
+                }
             }
         }
         .onAppear {
@@ -76,6 +86,16 @@ struct ContentView: View {
         .onDisappear {
             activityScanner.stop()
         }
+    }
+
+    private var themeToggleButton: some View {
+        Button {
+            appState.setAppearance(isDarkNow ? "light" : "dark")
+        } label: {
+            Image(systemName: isDarkNow ? "sun.max" : "moon")
+        }
+        .buttonStyle(.plain)
+        .help(isDarkNow ? "라이트 모드로 전환" : "다크 모드로 전환")
     }
 }
 

@@ -102,19 +102,15 @@ final class TerminalWebView: NSView {
         }
     }
 
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        applyTheme()
-    }
-
+    /// 터미널 팔레트는 항상 다크 고정 — 색 보정 레이어를 tmux 하나로 줄이기 위한 결정.
+    ///
+    /// claude/codex 같은 harness는 다크 배경을 전제로 ANSI 색을 명시해 찍고,
+    /// tmux가 그 위에서 한 번 보정한다. 여기에 앱 테마까지 배경을 흰색으로
+    /// 뒤집으면(ANSI 16색은 그대로인 채) 세 번째 보정 레이어가 생겨 라이트/다크를
+    /// 오갈 때마다 어긋난다. 앱의 라이트/다크는 크롬(타이틀바·시트)만 바꾸고
+    /// 터미널 픽셀은 건드리지 않는다.
     private func applyTheme() {
-        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let theme: String
-        if dark {
-            theme = "{\"background\":\"#1e1e1e\",\"foreground\":\"#d4d4d4\",\"cursor\":\"#d4d4d4\",\"selectionBackground\":\"#264f78\"}"
-        } else {
-            theme = "{\"background\":\"#ffffff\",\"foreground\":\"#1e1e1e\",\"cursor\":\"#1e1e1e\",\"selectionBackground\":\"#b5d5ff\"}"
-        }
+        let theme = "{\"background\":\"#1e1e1e\",\"foreground\":\"#d4d4d4\",\"cursor\":\"#d4d4d4\",\"selectionBackground\":\"#264f78\"}"
         webView.evaluateJavaScript("window.smSetTheme(\(theme))", completionHandler: nil)
     }
 
