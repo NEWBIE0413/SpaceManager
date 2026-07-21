@@ -23,6 +23,10 @@ struct ContentView: View {
                 .frame(minWidth: 200)
         } detail: {
             TerminalAreaView()
+                .overlay(alignment: .top) {
+                    ActivityIslandView()
+                        .padding(.top, 10)
+                }
         }
         .environmentObject(appState)
         .focusedSceneObject(appState)
@@ -83,6 +87,7 @@ struct NewWorkspaceSheet: View {
                         panel.canChooseFiles = false
                         panel.canChooseDirectories = true
                         panel.allowsMultipleSelection = false
+                        panel.canCreateDirectories = true   // 새 프로젝트 폴더를 그 자리에서 만들 수 있게
 
                         if panel.runModal() == .OK, let url = panel.url {
                             path = url.path
@@ -145,6 +150,7 @@ struct AddProjectSheet: View {
                     panel.canChooseFiles = false
                     panel.canChooseDirectories = true
                     panel.allowsMultipleSelection = false
+                    panel.canCreateDirectories = true
 
                     if panel.runModal() == .OK, let url = panel.url {
                         path = url.path

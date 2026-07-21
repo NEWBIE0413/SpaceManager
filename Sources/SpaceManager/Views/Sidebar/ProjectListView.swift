@@ -1,42 +1,20 @@
 import SwiftUI
 import AppKit
 
-/// List of projects in the selected workspace
+/// 선택된 워크스페이스의 파일 브라우저 섹션.
+/// 워크스페이스 이름은 위 WORKSPACES 목록의 선택 행이 이미 보여주므로
+/// 여기서 반복하지 않는다 — 같은 정보가 두 번 보이면 패널이 소음이 된다.
 struct ProjectListView: View {
     @EnvironmentObject var appState: AppState
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
-                Text("WORKSPACE")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.warmPinkMuted)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 6)
-
                 if let workspace = appState.selectedWorkspace {
-                    let rootProject = Project(path: workspace.rootPath, name: workspace.name)
-                    ProjectRow(
-                        project: rootProject,
-                        isSelected: appState.selectedProject?.path == rootProject.path,
-                        isRoot: true
-                    )
-                    .onTapGesture {
-                        appState.selectProject(rootProject)
-                    }
-                    .contextMenu {
-                        Button("Show in Finder") {
-                            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: rootProject.path)
-                        }
-                    }
-                    .padding(.horizontal, 8)
-
                     ProjectFileBrowser(rootPath: workspace.rootPath)
                         .id(workspace.id)
-                        .padding(.top, 8)
-                        .padding(.horizontal, 12)
                 } else {
+                    SidebarSectionHeader(title: "FILES") { EmptyView() }
                     Text("Select a workspace")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -45,56 +23,6 @@ struct ProjectListView: View {
                 }
             }
         }
-    }
-}
-
-/// Single project row
-struct ProjectRow: View {
-    let project: Project
-    let isSelected: Bool
-    var isRoot: Bool = false
-    @State private var isHovering = false
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: isRoot ? "house.fill" : "folder")
-                .font(.system(size: 13))
-                .foregroundColor(isRoot ? .secondary : .secondary.opacity(0.8))
-                .frame(width: 16)
-
-            Text(project.name)
-                .font(.system(size: 13, weight: isSelected || isRoot ? .medium : .regular))
-                .foregroundColor(isSelected ? .warmPink : .primary.opacity(0.9))
-                .lineLimit(1)
-
-            Spacer()
-
-            if isRoot {
-                Text("ROOT")
-                    .font(.system(size: 9, weight: .bold))
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(Color.secondary.opacity(0.1))
-                    .cornerRadius(3)
-                    .foregroundColor(.secondary)
-            }
-
-            if !project.exists {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.caption2)
-                    .foregroundColor(.orange)
-                    .help("Path not found")
-            }
-        }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.primary.opacity(0.08) : (isHovering ? Color.primary.opacity(0.04) : Color.clear))
-        )
-        .contentShape(Rectangle())
-        .onHover { isHovering = $0 }
-        .help(project.path)
     }
 }
 
@@ -107,14 +35,8 @@ private struct ProjectFileBrowser: View {
     @State private var refreshToken = UUID()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("FILES")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.warmPinkMuted)
-
-                Spacer()
-
+        VStack(alignment: .leading, spacing: 2) {
+            SidebarSectionHeader(title: "FILES") {
                 Menu {
                     Button("New File") {
                         createFile(in: URL(fileURLWithPath: rootPath))
@@ -122,27 +44,37 @@ private struct ProjectFileBrowser: View {
                     Button("New Folder") {
                         createFolder(in: URL(fileURLWithPath: rootPath))
                     }
+                    Divider()
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: rootPath)
+                    }
                 } label: {
-                    Image(systemName: "plus.circle")
-                        .font(.system(size: 12, weight: .medium))
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .bold))
                         .foregroundColor(.secondary)
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
+                .frame(width: 20)
+                .help("New File / Folder")
             }
-            .padding(.top, 6)
 
-            if isLoading {
+            // 스피너는 최초 로드에만 보여준다 — 갱신 때마다 트리를 스피너로 갈아끼우면
+            // 파일이 바뀔 때마다 패널 전체가 깜빡인다. 갱신은 항목 id(경로)가 안정적이라
+            // 제자리 diff로 조용히 반영된다.
+            if isLoading && items.isEmpty {
                 ProgressView()
                     .controlSize(.small)
+                    .padding(.horizontal, 16)
                     .padding(.vertical, 6)
             } else if items.isEmpty {
                 Text("No files")
                     .font(.caption)
                     .foregroundColor(.secondary)
+                    .padding(.horizontal, 16)
                     .padding(.vertical, 4)
             } else {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     ForEach(items) { item in
                         FileNodeView(
                             item: item,
@@ -155,6 +87,7 @@ private struct ProjectFileBrowser: View {
                         )
                     }
                 }
+                .padding(.horizontal, 12)
             }
         }
         .onAppear {
@@ -189,7 +122,7 @@ private struct ProjectFileBrowser: View {
             items = []
             return
         }
-        isLoading = true
+        if items.isEmpty { isLoading = true }
         let rootURL = URL(fileURLWithPath: rootPath)
         DispatchQueue.global(qos: .userInitiated).async {
             let loaded = FileItem.loadChildren(of: rootURL)
@@ -404,23 +337,27 @@ private struct FileRowView: View {
     let onRename: (FileItem) -> Void
     let onCreateFile: (URL) -> Void
     let onCreateFolder: (URL) -> Void
+    @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: item.isExpandable ? "folder" : "doc")
+            Image(systemName: item.isExpandable ? "folder" : "doc.text")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
                 .frame(width: 14)
 
             Text(item.name)
                 .font(.system(size: 12))
-                .foregroundColor(.primary)
+                .foregroundColor(.primary.opacity(0.9))
                 .lineLimit(1)
 
-            Spacer()
+            Spacer(minLength: 0)
         }
         .padding(.leading, CGFloat(depth) * 12)
-        .padding(.vertical, 3)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .background(Sidebar.rowBackground(isSelected: false, isHovering: isHovering))
+        .onHover { isHovering = $0 }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             if !item.isExpandable {

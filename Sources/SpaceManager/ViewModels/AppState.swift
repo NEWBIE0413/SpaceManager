@@ -255,6 +255,10 @@ class AppState: ObservableObject {
     }
 
     func removeSession(_ session: TerminalSession) {
+        // 메인 탭은 닫기 대상이 아니다 — ensureSessions가 다음 방문에 어차피 재생성하므로
+        // 여기서 지우면 "지워졌다가 되살아나는" 유령 삭제가 된다. UI(WorkspaceTabRow)도
+        // 메인 탭엔 ×를 숨기지만, 진입점이 늘어도 안전하도록 모델에서도 막는다.
+        guard session.kind != .tmuxMain else { return }
         session.cleanup()
         sessions.removeAll { $0.id == session.id }
         if let workspace = selectedWorkspace {

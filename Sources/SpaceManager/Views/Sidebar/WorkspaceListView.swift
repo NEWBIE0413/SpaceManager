@@ -9,14 +9,7 @@ struct WorkspaceListView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            // Section Header
-            HStack {
-                Text("WORKSPACES")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.warmPinkMuted)
-
-                Spacer()
-
+            SidebarSectionHeader(title: "WORKSPACES") {
                 Button {
                     appState.showNewWorkspaceSheet = true
                 } label: {
@@ -25,12 +18,10 @@ struct WorkspaceListView: View {
                         .foregroundColor(isHoveringHeader ? .primary : .secondary)
                 }
                 .buttonStyle(.plain)
+                .frame(width: 20)
                 .help("New Workspace")
                 .onHover { isHoveringHeader = $0 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 6)
 
             if appState.workspaces.isEmpty {
                 Text("No workspaces")
@@ -129,6 +120,10 @@ struct WorkspaceTabRow: View {
     let onClose: () -> Void
     @State private var isHovering = false
 
+    /// 메인 탭은 워크스페이스의 고정 앵커라 닫아도 다음 방문에 재생성된다 —
+    /// 닫히는 척만 하는 ×를 보여주느니 처음부터 닫기 대상에서 제외한다.
+    private var isClosable: Bool { session.kind != .tmuxMain }
+
     var body: some View {
         HStack(spacing: 6) {
             Circle()
@@ -142,27 +137,26 @@ struct WorkspaceTabRow: View {
                 .foregroundColor(isSelected ? .warmPink : .primary.opacity(0.7))
                 .lineLimit(1)
 
-            Spacer()
+            Spacer(minLength: 0)
 
-            if isHovering {
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(.secondary)
-                        .frame(width: 14, height: 14)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Close Tab")
+            // 자리를 항상 확보하고 투명도로만 나타낸다 — 호버 때 요소가 끼어들면
+            // 텍스트가 밀리며 목록이 출렁인다
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.secondary)
+                    .frame(width: 14, height: 14)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .help("Close Tab")
+            .opacity(isClosable && isHovering ? 1 : 0)
+            .allowsHitTesting(isClosable && isHovering)
         }
         .padding(.vertical, 4)
         .padding(.leading, 32)
         .padding(.trailing, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 5)
-                .fill(isSelected ? Color.primary.opacity(0.06) : (isHovering ? Color.primary.opacity(0.03) : Color.clear))
-        )
+        .background(Sidebar.rowBackground(isSelected: isSelected, isHovering: isHovering))
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .onTapGesture(perform: onSelect)
@@ -206,18 +200,20 @@ struct WorkspaceRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: isSelected ? "folder.fill" : "folder")
-                .font(.system(size: 13))
-                .foregroundColor(.secondary)
-                .frame(width: 16)
+                .font(.system(size: Sidebar.iconSize))
+                .foregroundColor(isSelected ? .warmPink.opacity(0.8) : .secondary)
+                .frame(width: Sidebar.iconFrame)
 
+            // 경로 부제는 선택된 행에만 — 호버로 행 높이가 변하면 목록 전체가 출렁인다.
+            // 다른 행의 경로는 툴팁(.help)으로 확인.
             VStack(alignment: .leading, spacing: 2) {
                 Text(workspace.name)
                     .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                     .foregroundColor(isSelected ? .warmPink : .primary.opacity(0.9))
                     .lineLimit(1)
 
-                if isSelected || isHovering {
-                    Text(workspace.rootPath)
+                if isSelected {
+                    Text(workspace.rootPath.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
@@ -225,42 +221,29 @@ struct WorkspaceRow: View {
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 0)
 
-            // 새 탭 메뉴 — 선택/호버 시 표시
-            if isSelected || isHovering {
-                Menu {
-                    Button("셸 탭") { onAddShellTab?() }
-                    if TmuxBootstrap.isTmuxAvailable {
-                        Button("tmux 탭") { onAddTmuxTab?() }
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.secondary)
+            // 자리를 항상 확보하고 투명도로만 나타낸다 (호버 출렁임 방지)
+            Menu {
+                Button("셸 탭") { onAddShellTab?() }
+                if TmuxBootstrap.isTmuxAvailable {
+                    Button("tmux 탭") { onAddTmuxTab?() }
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .frame(width: 20)
-                .help("New Tab")
-            }
-
-            if workspace.additionalProjects.count > 0 {
-                Text("\(workspace.additionalProjects.count)")
-                    .font(.system(size: 10, weight: .medium))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.secondary.opacity(0.1))
-                    .cornerRadius(4)
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.secondary)
             }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 20)
+            .help("New Tab")
+            .opacity(isSelected || isHovering ? 1 : 0)
+            .allowsHitTesting(isSelected || isHovering)
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.primary.opacity(0.08) : (isHovering ? Color.primary.opacity(0.04) : Color.clear))
-        )
+        .padding(.vertical, Sidebar.rowVerticalPadding)
+        .padding(.horizontal, Sidebar.rowHorizontalPadding)
+        .background(Sidebar.rowBackground(isSelected: isSelected, isHovering: isHovering))
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .help(workspace.rootPath)
