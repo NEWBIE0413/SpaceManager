@@ -54,9 +54,12 @@ enum TmuxBootstrap {
         return socketExists ? .warmAttach : .coldBirther
     }
 
-    /// 콜드 부트 창: birther의 서버 기동 + conf 로드 + 가드 평가 + 복원 시작을
-    /// 덮고도 남는 시간. 이 창이 지난 뒤의 탭은 평상시(warm) 경로로 돌아간다.
-    static let coldBootWindowSeconds: TimeInterval = 15
+    /// 콜드 부트 창: 외부 복구 파이프라인(continuum 레이아웃 복원 + 세션복구
+    /// 에이전트의 에이전트 재주입)이 끝나기까지 걸릴 수 있는 시간을 덮는다.
+    /// 이 창 안에 시작하는 모든 탭은 "선점하지 않는" 인내 스크립트를 쓴다 —
+    /// 창이 짧으면 유저가 부팅 직후 연 탭이 warm 경로로 새 세션을 만들어
+    /// 복원될 이름을 가로챈다 (2026-07-24 사고의 한 갈래).
+    static let coldBootWindowSeconds: TimeInterval = 150
 
     /// 탭이 실행할 부트스트랩 스크립트 선택. 메인 스레드에서만 호출된다
     /// (PTY 시작은 WKWebView ready 콜백 → 메인 스레드 경유).
@@ -81,25 +84,55 @@ enum TmuxBootstrap {
         return FileManager.default.fileExists(atPath: "\(tmpDir)/tmux-\(getuid())/default")
     }
 
-    /// 콜드 부트 스크립트. birther는 임시 세션으로 서버를 깨운 뒤 정리까지 맡는다.
+    /// 콜드 부트 스크립트 v2 — 앱은 부팅 복구의 "순수 follower"다.
     ///
-    /// 시퀀스: (birther만) __sm_boot 생성으로 서버 기동 → 전원 4초 침묵
-    /// (continuum 가드가 프로세스 테이블을 검사하는 창 — 이 동안 tmux 명령 금지)
-    /// → 목표 세션이 나타날 때까지 폴링 (resurrect 복원이 채워주는 시간; 복원
-    /// 프로세스가 이미 사라졌으면 일찍 탈출) → 없으면 생성 → attach.
+    /// 이 머신의 재부팅 복구는 앱 밖의 파이프라인이 담당한다: continuum이 레이아웃
+    /// (세션/창/패널)을 복원하고, 세션복구 에이전트가 각 패널에 에이전트를 재주입한다.
+    /// 앱이 그보다 먼저 세션을 만들면 resurrect가 그 이름을 건너뛰어 레이아웃이
+    /// 유실되고 에이전트 주입 좌표가 어긋난다 (2026-07-24 사고). 그래서:
+    ///
+    /// 1) 댕글링 `last` 자가치유 — 재부팅 직전 저장이 디스크에 못 남으면 심링크가
+    ///    허공을 가리켜 복원 전체가 즉사한다. 최신 실존 저장본으로 교정.
+    /// 2) 서버 대기를 tmux 명령 없이 소켓 파일 폴링으로 — 폴링 프로세스가
+    ///    conf 로드 시점에 잡히면 continuum 가드가 다중 서버로 오판한다.
+    ///    저장본이 있으면 90초까지 기다린다 (부팅 폭주에서 파이프라인은 느리다).
+    /// 3) birther는 그 뒤에도 서버가 없을 때만 깨운다 (파이프라인 부재 폴백).
+    ///    행이 걸려도 죽이지 않는다 — 미데몬화 서버를 물고 있으면 서버째 죽는다.
+    /// 4) 저장본에 이 세션명이 있으면 120초까지 생성하지 않는다 — 복원이 채울
+    ///    이름을 앱이 가로채는 게 사고의 본질이었다. 없으면 신규이니 짧게 대기 후 생성.
     static func coldBootScript(sessionName: String, workingDirectory: String, birther: Bool) -> String {
         let name = sessionName.shQuoted
         let dir = workingDirectory.shQuoted
-        let birthLine = birther ? "tmux new-session -d -s __sm_boot -c \(dir) 2>/dev/null\n" : ""
+        let birthBlock = birther ? """
+        if [ ! -S "$SOCK" ]; then
+          tmux new-session -d -s __sm_boot -c \(dir) 2>/dev/null &
+          j=0; while [ ! -S "$SOCK" ] && [ $j -lt 60 ]; do sleep 0.5; j=$((j+1)); done
+        fi
+        """ : """
+        j=0; while [ ! -S "$SOCK" ] && [ $j -lt 70 ]; do sleep 0.5; j=$((j+1)); done
+        """
         let cleanupLine = birther ? "tmux kill-session -t __sm_boot 2>/dev/null\n" : ""
         return """
-        \(birthLine)sleep 4
+        RES="$HOME/.local/share/tmux/resurrect"
+        if [ -L "$RES/last" ] && [ ! -e "$RES/last" ]; then
+          newest=$(ls -t "$RES"/tmux_resurrect_*.txt 2>/dev/null | head -1)
+          [ -n "$newest" ] && ln -sf "$(basename "$newest")" "$RES/last"
+        fi
+        SOCK="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/default"
+        PATIENCE=180; [ -e "$RES/last" ] || PATIENCE=20
+        i=0
+        while [ ! -S "$SOCK" ] && [ $i -lt $PATIENCE ]; do sleep 0.5; i=$((i+1)); done
+        \(birthBlock)
+        sleep 5
+        WAIT=20
+        if [ -e "$RES/last" ] && awk -F'\\t' -v n=\(name) '$1=="pane" && $2==n {f=1} END {exit !f}' "$RES/last" 2>/dev/null; then
+          WAIT=240
+        fi
         i=0
         until tmux has-session -t \(name) 2>/dev/null; do
           i=$((i+1))
-          [ "$i" -ge 32 ] && break
-          if [ "$i" -ge 8 ] && ! pgrep -qf 'tmux-resurrect/scripts/restore.sh'; then break; fi
-          sleep 0.25
+          [ "$i" -ge "$WAIT" ] && break
+          sleep 0.5
         done
         tmux has-session -t \(name) 2>/dev/null || tmux new-session -d -s \(name) -c \(dir)
         \(cleanupLine)exec tmux attach-session -t \(name)
