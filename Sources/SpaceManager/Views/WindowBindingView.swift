@@ -69,6 +69,10 @@ final class WindowBindingNSView: NSView {
         window.styleMask.insert(.fullSizeContentView)
         window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = true
+        // titlebar가 보이지 않아도 Mission Control, Dock, 창 전환기는 이 값을 쓴다.
+        // ContentView가 AppState 변경을 관찰해 updateNSView를 다시 호출하므로
+        // 워크스페이스 전환과 같은 렌더 사이클에 창 제목도 갱신된다.
+        window.title = appState.selectedWorkspace?.name ?? "SpaceManager"
 
         // full-size titlebar 설정과 무관하게 창별 AppState 바인딩은 유지한다.
         // 아일랜드의 다른 창 워크스페이스 점프가 이 연결을 사용한다.
