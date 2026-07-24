@@ -40,6 +40,10 @@ struct ContentView: View {
             IslandPanelView(scanner: activityScanner, hover: islandHover)
                 .padding(.top, 4)
         }
+        .background {
+            WindowBindingView(appState: appState, scanner: activityScanner, hover: islandHover)
+                .frame(width: 0, height: 0)
+        }
         .environmentObject(appState)
         .focusedSceneObject(appState)
         .preferredColorScheme(preferredScheme)
@@ -59,21 +63,12 @@ struct ContentView: View {
         }
         .navigationTitle(appState.selectedWorkspace?.name ?? "SpaceManager")
         .toolbar {
-            // macOS 26+ 툴바는 커스텀 아이템 뒤에 glass 캡슐을 자동으로 깔아준다 —
-            // 검은 아일랜드 필이 흰 캡슐 안에 갇히므로 공유 배경을 숨긴다
             if #available(macOS 26.0, *) {
-                ToolbarItem(placement: .principal) {
-                    IslandPillView(scanner: activityScanner, hover: islandHover)
-                }
-                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .primaryAction) {
                     themeToggleButton
                 }
                 .sharedBackgroundVisibility(.hidden)
             } else {
-                ToolbarItem(placement: .principal) {
-                    IslandPillView(scanner: activityScanner, hover: islandHover)
-                }
                 ToolbarItem(placement: .primaryAction) {
                     themeToggleButton
                 }
