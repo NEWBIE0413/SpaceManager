@@ -51,11 +51,17 @@ struct ContentView: View {
             // 확장 패널 (아일랜드) - 상단 중앙에 직접 배치
             VStack(spacing: 8) {
                 IslandPillView(scanner: activityScanner, hover: islandHover)
-                    .padding(.top, 24)
+                    // full-size content의 실제 창 상단 기준. 30pt pill 중심이
+                    // 신호등 중심선과 맞고, 아래 패널은 pill 다음에 자연히 열린다.
+                    .padding(.top, 6)
                 
                 IslandPanelView(scanner: activityScanner, hover: islandHover)
             }
         }
+        // hiddenTitleBar도 SwiftUI 컨테이너에는 기존 타이틀바 safe area를 남긴다.
+        // 캔버스 좌표계를 창 프레임 상단까지 확장하고, 신호등과 카드의 간격은
+        // 위 HStack의 명시적 36pt inset 하나로만 관리한다.
+        .ignoresSafeArea(.container, edges: .top)
         .background {
             WindowBindingView(appState: appState, scanner: activityScanner, hover: islandHover)
                 .frame(width: 0, height: 0)

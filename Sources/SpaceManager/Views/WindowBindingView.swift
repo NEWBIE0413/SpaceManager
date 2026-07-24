@@ -60,6 +60,18 @@ final class WindowBindingNSView: NSView {
             WorkspaceWindowRegistry.shared.detach(window: boundWindow, from: appState)
         }
         boundWindow = window
+
+        // hiddenTitleBar 씬의 콘텐츠를 실제 프레임 상단까지 연장한다. 최상단의
+        // 비어 있는 면은 창 드래그 영역으로 남고, SwiftUI의 pill/버튼처럼
+        // hit-test되는 컨트롤은 정상적으로 이벤트를 받는다.
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.styleMask.insert(.fullSizeContentView)
+        window.titlebarSeparatorStyle = .none
+        window.isMovableByWindowBackground = true
+
+        // full-size titlebar 설정과 무관하게 창별 AppState 바인딩은 유지한다.
+        // 아일랜드의 다른 창 워크스페이스 점프가 이 연결을 사용한다.
         WorkspaceWindowRegistry.shared.attach(window: window, to: appState)
     }
 }
