@@ -24,7 +24,7 @@ struct SidebarView: View {
             Spacer()
         }
         .frame(maxHeight: .infinity)
-        .background(Color.panelDark.ignoresSafeArea())
+        .background(Color.panelDark)
         .environment(\.colorScheme, .dark)
     }
 }

@@ -7,6 +7,7 @@ struct WorkspaceListView: View {
     @ObservedObject private var activity = RecentActivityScanner.shared
     @State private var isHoveringHeader = false
     @State private var draggingWorkspace: Workspace?
+    @Namespace private var animation
 
     /// 이 워크스페이스(루트 및 하위 경로)에서의 마지막 Claude 대화 시각
     private func lastConversation(for workspace: Workspace) -> Date? {
@@ -52,11 +53,14 @@ struct WorkspaceListView: View {
                         isSelected: appState.selectedWorkspace?.id == workspace.id,
                         lastConversation: lastConversation(for: workspace),
                         isGenerating: isGenerating(workspace),
+                        animation: animation,
                         onAddShellTab: { appState.selectWorkspace(workspace); appState.addShellTab() },
                         onAddTmuxTab: { appState.selectWorkspace(workspace); appState.addTmuxTab() }
                     )
                     .onTapGesture {
-                        appState.selectWorkspace(workspace)
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            appState.selectWorkspace(workspace)
+                        }
                     }
                     .onDrag {
                         draggingWorkspace = workspace
@@ -118,7 +122,12 @@ struct WorkspaceListView: View {
                             WorkspaceTabRow(
                                 session: session,
                                 isSelected: appState.selectedSession?.id == session.id,
-                                onSelect: { appState.selectSession(session) },
+                                animation: animation,
+                                onSelect: { 
+                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                        appState.selectSession(session)
+                                    }
+                                },
                                 onClose: { appState.removeSession(session) }
                             )
                         }
@@ -194,6 +203,7 @@ struct WorkspaceActivityDot: View {
 struct WorkspaceTabRow: View {
     @ObservedObject var session: TerminalSession
     let isSelected: Bool
+    let animation: Namespace.ID
     let onSelect: () -> Void
     let onClose: () -> Void
     @State private var isHovering = false
@@ -234,7 +244,17 @@ struct WorkspaceTabRow: View {
         .padding(.vertical, 4)
         .padding(.leading, 32)
         .padding(.trailing, 8)
-        .background(Sidebar.rowBackground(isSelected: isSelected, isHovering: isHovering))
+        .background {
+            if isSelected {
+                RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius)
+                    .fill(Color.white.opacity(0.12))
+                    .shadow(color: Color.black.opacity(0.2), radius: 4, y: 2)
+                    .matchedGeometryEffect(id: "selection_bg", in: animation)
+            } else if isHovering {
+                RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius)
+                    .fill(Color.primary.opacity(0.04))
+            }
+        }
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .onTapGesture(perform: onSelect)
@@ -273,6 +293,7 @@ struct WorkspaceRow: View {
     let isSelected: Bool
     var lastConversation: Date?
     var isGenerating: Bool = false
+    let animation: Namespace.ID
     var onAddShellTab: (() -> Void)?
     var onAddTmuxTab: (() -> Void)?
     @State private var isHovering = false
@@ -325,7 +346,17 @@ struct WorkspaceRow: View {
         }
         .padding(.vertical, Sidebar.rowVerticalPadding)
         .padding(.horizontal, Sidebar.rowHorizontalPadding)
-        .background(Sidebar.rowBackground(isSelected: isSelected, isHovering: isHovering))
+        .background {
+            if isSelected {
+                RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius)
+                    .fill(Color.white.opacity(0.12))
+                    .shadow(color: Color.black.opacity(0.2), radius: 4, y: 2)
+                    .matchedGeometryEffect(id: "selection_bg", in: animation)
+            } else if isHovering {
+                RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius)
+                    .fill(Color.primary.opacity(0.04))
+            }
+        }
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .help(workspace.rootPath)

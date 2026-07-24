@@ -356,7 +356,10 @@ private struct FileRowView: View {
         .padding(.leading, CGFloat(depth) * 12)
         .padding(.vertical, 4)
         .padding(.horizontal, 6)
-        .background(Sidebar.rowBackground(isSelected: false, isHovering: isHovering))
+        .background(
+            RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius)
+                .fill(isHovering ? Color.primary.opacity(0.04) : Color.clear)
+        )
         .onHover { isHovering = $0 }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {

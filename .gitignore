@@ -20,3 +20,9 @@ Package.resolved
 .idea/
 *.xcworkspace
 !*.xcworkspace/contents.xcworkspacedata
+
+# 빌드 산출물·배포물·로컬 미디어는 추적하지 않는다
+SpaceManager.app/
+SpaceManager-*.dmg
+*.mov
+.build/

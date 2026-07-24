@@ -14,17 +14,11 @@ extension Color {
 /// 사이드바 공통 룩 — 행 높이·아이콘 크기·라운딩을 한 곳에서 통일한다.
 /// 섹션마다 수치가 조금씩 다르면 패널 전체가 미묘하게 어수선해 보인다.
 enum Sidebar {
-    static let rowCornerRadius: CGFloat = 6
-    static let rowVerticalPadding: CGFloat = 6
-    static let rowHorizontalPadding: CGFloat = 8
+    static let rowCornerRadius: CGFloat = 10
+    static let rowVerticalPadding: CGFloat = 8
+    static let rowHorizontalPadding: CGFloat = 12
     static let iconSize: CGFloat = 13
     static let iconFrame: CGFloat = 16
-
-    static func rowBackground(isSelected: Bool, isHovering: Bool) -> some View {
-        RoundedRectangle(cornerRadius: rowCornerRadius)
-            .fill(isSelected ? Color.primary.opacity(0.08)
-                             : (isHovering ? Color.primary.opacity(0.04) : Color.clear))
-    }
 }
 
 /// 사이드바 섹션 헤더 — WORKSPACES / FILES가 같은 얼굴을 갖도록 공용화.

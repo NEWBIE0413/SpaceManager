@@ -29,14 +29,24 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            SidebarView()
-                .frame(minWidth: 200)
-        } detail: {
-            TerminalAreaView()
-        }
-        // 확장 패널은 창 전체 기준 상단 중앙 — 타이틀바의 필에서 내려오는 노치 연출
-        .overlay(alignment: .top) {
+        ZStack(alignment: .top) {
+            // 메인 캔버스 배경 (다크모드/라이트모드 대응)
+            Color(nsColor: .windowBackgroundColor)
+                .ignoresSafeArea()
+            
+            HStack(spacing: 12) {
+                SidebarView()
+                    .frame(width: 240)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                
+                TerminalAreaView()
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .shadow(color: Color.black.opacity(isDarkNow ? 0.3 : 0.1), radius: 8, x: 0, y: 4)
+            }
+            // 캔버스 인셋
+            .padding(12)
+            
+            // 확장 패널 (아일랜드)
             IslandPanelView(scanner: activityScanner, hover: islandHover)
                 .padding(.top, 4)
         }
