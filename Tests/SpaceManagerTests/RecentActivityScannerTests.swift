@@ -40,7 +40,8 @@ final class RecentActivityScannerTests: XCTestCase {
         XCTAssertEqual(found.first?.cwd, "/tmp/proj")
         XCTAssertEqual(found.first?.name, "proj")
         XCTAssertEqual(found.first?.snippet, "버그 고쳐줘")
-        XCTAssertEqual(found.first?.id, "aaaa")
+        XCTAssertEqual(found.first?.id, "claude:aaaa")
+        XCTAssertEqual(found.first?.provider, .claude)
     }
 
     func testScanIgnoresOldSessions() throws {
@@ -106,6 +107,51 @@ final class RecentActivityScannerTests: XCTestCase {
         XCTAssertEqual(found.first.map(\.lastActivity), found.map(\.lastActivity).max())
     }
 
+    func testTranscriptTimestampSurvivesBatchMtimeTouch() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let actualActivity = now.addingTimeInterval(-7200)
+        let timestamp = ISO8601DateFormatter.string(
+            from: actualActivity,
+            timeZone: TimeZone(secondsFromGMT: 0)!,
+            formatOptions: [.withInternetDateTime]
+        )
+        _ = try writeTranscript(project: "-tmp-touched", session: "touched", lines: [
+            "{\"type\":\"user\",\"cwd\":\"/tmp/touched\",\"timestamp\":\"" + timestamp + "\",\"message\":{\"content\":\"과거 작업\"}}",
+        ], mtime: now.addingTimeInterval(-30))
+
+        let result = scanNow(now: now)
+        XCTAssertTrue(result.sessions.isEmpty, "최근 mtime만으로 1시간 아일랜드에 재등장하면 안 된다")
+        let recorded = try XCTUnwrap(result.activityByCwd["/tmp/touched"])
+        XCTAssertEqual(
+            recorded.timeIntervalSince1970,
+            actualActivity.timeIntervalSince1970,
+            accuracy: 1
+        )
+    }
+
+    func testBatchTouchedTranscriptsKeepDistinctInternalActivityTimes() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let sharedMtime = now.addingTimeInterval(-30)
+        for (name, age) in [("newer", 300.0), ("older", 1800.0)] {
+            let timestamp = ISO8601DateFormatter.string(
+                from: now.addingTimeInterval(-age),
+                timeZone: TimeZone(secondsFromGMT: 0)!,
+                formatOptions: [.withInternetDateTime]
+            )
+            _ = try writeTranscript(project: "-tmp-" + name, session: name, lines: [
+                "{\"type\":\"user\",\"cwd\":\"/tmp/" + name + "\",\"timestamp\":\"" + timestamp + "\",\"message\":{\"content\":\"작업\"}}",
+            ], mtime: sharedMtime)
+        }
+
+        let sessions = scanNow(now: now).sessions
+        XCTAssertEqual(sessions.map(\.name), ["newer", "older"])
+        XCTAssertEqual(
+            sessions[0].lastActivity.timeIntervalSince(sessions[1].lastActivity),
+            1500,
+            accuracy: 1
+        )
+    }
+
     func testGeneratingDirectoriesComeFromRecentTranscriptMtime() throws {
         let now = Date()
         _ = try writeTranscript(project: "-tmp-active", session: "active", lines: [
@@ -153,5 +199,30 @@ final class RecentActivityScannerTests: XCTestCase {
         XCTAssertTrue(
             RecentActivityScanner.findGeneratingDirectories(in: scan.trackedTranscripts, now: now).isEmpty
         )
+    }
+
+    func testMergedProvidersShareSessionsActivityMapAndGeneratingFiles() throws {
+        let now = Date()
+        let codexFile = try writeTranscript(project: "-tmp-codex", session: "codex", lines: ["{}"], mtime: now)
+        let geminiFile = try writeTranscript(project: "-tmp-gemini", session: "gemini", lines: ["{}"], mtime: now)
+        var result = RecentActivityScanner.ScanResult()
+        RecentActivityScanner.merge(records: [
+            AgentActivityRecord(
+                id: "codex:1", provider: .codex, cwd: "/tmp/shared",
+                lastActivity: now.addingTimeInterval(-20), snippet: "codex", growingFile: codexFile
+            ),
+            AgentActivityRecord(
+                id: "gemini:1", provider: .gemini, cwd: "/tmp/shared",
+                lastActivity: now.addingTimeInterval(-10), snippet: "gemini", growingFile: geminiFile
+            ),
+        ], into: &result, now: now)
+
+        XCTAssertEqual(result.sessions.map(\.provider), [.gemini, .codex])
+        let recorded = try XCTUnwrap(result.activityByCwd["/tmp/shared"])
+        XCTAssertEqual(recorded.timeIntervalSince1970,
+                       now.addingTimeInterval(-10).timeIntervalSince1970, accuracy: 1)
+        XCTAssertEqual(RecentActivityScanner.findGeneratingDirectories(
+            in: result.trackedTranscripts, now: now
+        ), ["/tmp/shared"])
     }
 }

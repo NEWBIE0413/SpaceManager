@@ -31,7 +31,7 @@ final class IslandHoverState: ObservableObject {
     }
 }
 
-/// 타이틀바에 상주하는 접힌 필 (ToolbarItem placement: .principal)
+/// 타이틀바 중앙에 상주하는 접힌 Dynamic Island pill
 struct IslandPillView: View {
     @ObservedObject var scanner: RecentActivityScanner
     @ObservedObject var hover: IslandHoverState
@@ -54,10 +54,10 @@ struct IslandPillView: View {
                         .lineLimit(1)
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 5)
-                .background(Color.panelDark.opacity(0.96))
+                .padding(.vertical, 8)
+                .frame(minHeight: 30)
+                .background(Color.black)
                 .clipShape(Capsule(style: .continuous))
-                .overlay(Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
                 .onHover { hovering in
                     hover.setPill(hovering)
                     if hovering { scanner.rescan() }
@@ -83,6 +83,7 @@ struct IslandPanelView: View {
     @EnvironmentObject var appState: AppState
     @ObservedObject var scanner: RecentActivityScanner
     @ObservedObject var hover: IslandHoverState
+    @ObservedObject private var windowRegistry = WorkspaceWindowRegistry.shared
 
     var body: some View {
         Group {
@@ -105,10 +106,11 @@ struct IslandPanelView: View {
                     ForEach(scanner.sessions) { session in
                         IslandSessionRow(
                             session: session,
-                            targetWorkspace: workspace(for: session),
-                            onJump: { workspace in
-                                appState.selectWorkspace(workspace)
-                                hover.setPanel(false)
+                            canJump: windowRegistry.canJump(to: session.cwd, preferredState: appState),
+                            onJump: {
+                                if windowRegistry.jump(to: session.cwd, preferredState: appState) {
+                                    hover.setPanel(false)
+                                }
                             }
                         )
                     }
@@ -117,13 +119,8 @@ struct IslandPanelView: View {
                     Spacer().frame(height: 8)
                 }
                 .frame(width: 340)
-                .background(Color.panelDark.opacity(0.97))
+                .background(Color.black)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.35), radius: 14, y: 4)
                 .onHover { hover.setPanel($0) }
                 .transition(.scale(scale: 0.9, anchor: .top).combined(with: .opacity))
             }
@@ -132,18 +129,12 @@ struct IslandPanelView: View {
         .animation(.easeInOut(duration: 0.2), value: scanner.sessions)
     }
 
-    /// 세션 cwd가 이 창의 어느 워크스페이스에 속하는지 (가장 깊은 루트 우선)
-    private func workspace(for session: RecentClaudeSession) -> Workspace? {
-        appState.workspaces
-            .filter { session.cwd == $0.rootPath || session.cwd.hasPrefix($0.rootPath + "/") }
-            .max { $0.rootPath.count < $1.rootPath.count }
-    }
 }
 
 private struct IslandSessionRow: View {
-    let session: RecentClaudeSession
-    let targetWorkspace: Workspace?
-    let onJump: (Workspace) -> Void
+    let session: RecentAgentSession
+    let canJump: Bool
+    let onJump: () -> Void
     @State private var isHovering = false
 
     var body: some View {
@@ -169,23 +160,21 @@ private struct IslandSessionRow: View {
                 .foregroundColor(.white.opacity(0.4))
                 .monospacedDigit()
 
-            // 이 창에 해당 워크스페이스가 있을 때만 점프 가능 표시
+            // 앱의 어느 창이든 해당 워크스페이스를 소유할 때 점프 가능 표시
             Image(systemName: "chevron.right")
                 .font(.system(size: 8, weight: .bold))
                 .foregroundColor(.white.opacity(0.35))
-                .opacity(targetWorkspace != nil && isHovering ? 1 : 0)
+                .opacity(canJump && isHovering ? 1 : 0)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.white.opacity(isHovering && targetWorkspace != nil ? 0.07 : 0))
+                .fill(Color.white.opacity(isHovering && canJump ? 0.07 : 0))
         )
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
-        .onTapGesture {
-            if let workspace = targetWorkspace { onJump(workspace) }
-        }
+        .onTapGesture { if canJump { onJump() } }
         .help(session.cwd)
     }
 

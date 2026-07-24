@@ -1,8 +1,9 @@
 import Foundation
 
-/// 최근 대화가 오간 Claude Code 세션 하나.
-struct RecentClaudeSession: Identifiable, Equatable {
+/// 최근 대화가 오간 에이전트 세션 하나.
+struct RecentAgentSession: Identifiable, Equatable {
     let id: String          // 세션 uuid (transcript 파일명)
+    let provider: AgentProvider
     let cwd: String         // 세션의 작업 디렉토리 (transcript의 cwd 필드)
     let name: String        // 표시용 — cwd 마지막 경로 요소
     let lastActivity: Date
@@ -11,9 +12,9 @@ struct RecentClaudeSession: Identifiable, Equatable {
 
 /// ~/.claude/projects/*/<uuid>.jsonl 의 mtime으로 "최근 대화가 오간" 세션을 찾는다.
 ///
-/// transcript는 메시지가 오갈 때마다 append되므로 mtime이 곧 마지막 상호작용 시각이다.
-/// 프로세스 목록이 아니라 파일 mtime을 보는 이유: 떠 있기만 하고 대화가 없는 세션은
-/// "최근 작업"이 아니고, 반대로 CLI를 껐어도 방금까지 대화했다면 최근 작업이 맞다.
+/// transcript는 메시지가 오갈 때마다 append된다. 생성 중 감지는 빠른 stat(mtime)을,
+/// 최근 대화 시각은 JSONL 내부 이벤트 timestamp를 쓴다. Claude의 유지보수 작업이 여러
+/// transcript의 mtime을 한꺼번에 만지는 경우에도 과거 대화가 전부 "방금"으로 뜨지 않는다.
 ///
 /// 한 번의 스캔이 두 소비자를 먹인다:
 /// - 아일랜드: 지난 1시간, 상위 8개, 스니펫 포함
@@ -26,7 +27,7 @@ final class RecentActivityScanner: ObservableObject {
     /// 모든 창이 같은 데이터를 보므로 하나만 돈다
     static let shared = RecentActivityScanner()
 
-    @Published private(set) var sessions: [RecentClaudeSession] = []
+    @Published private(set) var sessions: [RecentAgentSession] = []
     /// cwd → 마지막 대화 시각 (24시간 창)
     @Published private(set) var workspaceActivity: [String: Date] = [:]
     /// 지금 transcript가 자라고 있는 cwd들
@@ -49,12 +50,14 @@ final class RecentActivityScanner: ObservableObject {
     }
 
     struct ScanResult: Equatable {
-        var sessions: [RecentClaudeSession] = []
+        var sessions: [RecentAgentSession] = []
         var activityByCwd: [String: Date] = [:]
         var trackedTranscripts: [TrackedTranscript] = []
     }
 
     private let projectsDir: URL
+    private let codexSessionsDir: URL
+    private let geminiDir: URL
     private var discoveryTimer: Timer?
     private var generatingTimer: Timer?
     private let queue = DispatchQueue(label: "SpaceManager.RecentActivity", qos: .utility)
@@ -63,9 +66,14 @@ final class RecentActivityScanner: ObservableObject {
     /// 최근 전체 탐색에서 찾은 24시간 내 transcript (queue 위에서만 접근)
     private var trackedTranscripts: [TrackedTranscript] = []
 
-    init(projectsDir: URL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".claude/projects")) {
+    init(
+        projectsDir: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects"),
+        codexSessionsDir: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions"),
+        geminiDir: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".gemini")
+    ) {
         self.projectsDir = projectsDir
+        self.codexSessionsDir = codexSessionsDir
+        self.geminiDir = geminiDir
     }
 
     func start() {
@@ -88,9 +96,14 @@ final class RecentActivityScanner: ObservableObject {
 
     func rescan() {
         let dir = projectsDir
+        let codexDir = codexSessionsDir
+        let geminiRoot = geminiDir
         queue.async { [weak self] in
             guard let self else { return }
-            let result = Self.scan(projectsDir: dir, cwdCache: &self.cwdCache)
+            var result = Self.scan(projectsDir: dir, cwdCache: &self.cwdCache)
+            let records = AgentActivitySources.scanCodex(sessionsDir: codexDir)
+                + AgentActivitySources.scanGemini(geminiDir: geminiRoot)
+            Self.merge(records: records, into: &result)
             self.trackedTranscripts = result.trackedTranscripts
             let generating = Self.findGeneratingDirectories(in: result.trackedTranscripts)
             DispatchQueue.main.async {
@@ -121,7 +134,7 @@ final class RecentActivityScanner: ObservableObject {
             at: projectsDir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
         ) else { return ScanResult() }
 
-        var recent: [(url: URL, mtime: Date)] = []
+        var candidates: [(url: URL, mtime: Date)] = []
         let dotCutoff = now.addingTimeInterval(-dotWindow)
         for dir in projectDirs {
             guard let files = try? fm.contentsOfDirectory(
@@ -130,44 +143,73 @@ final class RecentActivityScanner: ObservableObject {
             for file in files where file.pathExtension == "jsonl" {
                 guard let mtime = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
                       mtime > dotCutoff else { continue }
-                recent.append((file, mtime))
+                candidates.append((file, mtime))
             }
         }
 
         var result = ScanResult()
+        var recent: [(url: URL, activity: Date, parsed: (cwd: String?, snippet: String?, lastActivity: Date?))] = []
 
-        // 24시간 창: cwd별 마지막 대화 시각. cwd는 캐시 우선, 처음 보는 파일만 tail 파싱
-        for entry in recent {
+        // mtime은 "내용이 바뀌었을 가능성"을 좁히는 1차 필터일 뿐이다. 실제 최근성은
+        // transcript 내부 마지막 이벤트 timestamp로 판정한다. timestamp가 없는 레거시/
+        // 테스트 transcript만 mtime으로 폴백한다.
+        for entry in candidates {
+            let parsed = parseTail(of: entry.url)
+            let activity = parsed.lastActivity ?? entry.mtime
+            guard activity > dotCutoff else { continue }
             let key = entry.url.path
-            let cwd: String?
-            if let cached = cwdCache[key] {
-                cwd = cached
-            } else {
-                cwd = parseTail(of: entry.url).cwd
-                if let cwd { cwdCache[key] = cwd }
-            }
+            let cwd = parsed.cwd ?? cwdCache[key]
             guard let cwd else { continue }
-            result.activityByCwd[cwd] = max(result.activityByCwd[cwd] ?? .distantPast, entry.mtime)
+            cwdCache[key] = cwd
+            result.activityByCwd[cwd] = max(result.activityByCwd[cwd] ?? .distantPast, activity)
             result.trackedTranscripts.append(TrackedTranscript(url: entry.url, cwd: cwd))
+            recent.append((entry.url, activity, parsed))
         }
 
         // 1시간 창 상위 8개만 스니펫까지 파싱 (아일랜드)
         let islandCutoff = now.addingTimeInterval(-islandWindow)
-        let top = recent.filter { $0.mtime > islandCutoff }.sorted { $0.mtime > $1.mtime }.prefix(maxSessions)
+        let top = recent.filter { $0.activity > islandCutoff }
+            .sorted { $0.activity > $1.activity }
+            .prefix(maxSessions)
         result.sessions = top.compactMap { entry in
-            let parsed = parseTail(of: entry.url)
-            guard let cwd = parsed.cwd else { return nil }
+            guard let cwd = entry.parsed.cwd else { return nil }
             let home = FileManager.default.homeDirectoryForCurrentUser.path
             let name = cwd == home ? "~" : URL(fileURLWithPath: cwd).lastPathComponent
-            return RecentClaudeSession(
-                id: entry.url.deletingPathExtension().lastPathComponent,
+            return RecentAgentSession(
+                id: "claude:\(entry.url.deletingPathExtension().lastPathComponent)",
+                provider: .claude,
                 cwd: cwd,
                 name: name,
-                lastActivity: entry.mtime,
-                snippet: parsed.snippet
+                lastActivity: entry.activity,
+                snippet: entry.parsed.snippet
             )
         }
         return result
+    }
+
+    static func merge(records: [AgentActivityRecord], into result: inout ScanResult, now: Date = Date()) {
+        let islandCutoff = now.addingTimeInterval(-islandWindow)
+        for record in records {
+            result.activityByCwd[record.cwd] = max(
+                result.activityByCwd[record.cwd] ?? .distantPast,
+                record.lastActivity
+            )
+            if let file = record.growingFile {
+                result.trackedTranscripts.append(TrackedTranscript(url: file, cwd: record.cwd))
+            }
+            if record.lastActivity > islandCutoff {
+                let home = FileManager.default.homeDirectoryForCurrentUser.path
+                result.sessions.append(RecentAgentSession(
+                    id: record.id,
+                    provider: record.provider,
+                    cwd: record.cwd,
+                    name: record.cwd == home ? "~" : URL(fileURLWithPath: record.cwd).lastPathComponent,
+                    lastActivity: record.lastActivity,
+                    snippet: record.snippet
+                ))
+            }
+        }
+        result.sessions = Array(result.sessions.sorted { $0.lastActivity > $1.lastActivity }.prefix(maxSessions))
     }
 
     /// 전체 탐색에서 이미 확인한 transcript만 stat하는 빠른 경로.
@@ -193,24 +235,35 @@ final class RecentActivityScanner: ObservableObject {
     /// transcript 끝부분에서 cwd와 마지막 유저 메시지를 뽑는다.
     /// 파일이 수백 MB일 수 있으므로 마지막 128KB만 읽는다 — cwd는 거의 모든 라인에 있고,
     /// 유저 텍스트도 보통 그 안에 있다. 못 찾으면 스니펫 없이 표시한다 (best-effort).
-    static func parseTail(of url: URL) -> (cwd: String?, snippet: String?) {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return (nil, nil) }
+    static func parseTail(of url: URL) -> (cwd: String?, snippet: String?, lastActivity: Date?) {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return (nil, nil, nil) }
         defer { try? handle.close() }
         let size = (try? handle.seekToEnd()) ?? 0
         let readLength = min(size, 131_072)
         try? handle.seek(toOffset: size - readLength)
         guard let data = try? handle.readToEnd(),
-              let text = String(data: data, encoding: .utf8) else { return (nil, nil) }
+              let text = String(data: data, encoding: .utf8) else { return (nil, nil, nil) }
 
         var cwd: String?
         var snippet: String?
+        var lastActivity: Date?
         for line in text.split(separator: "\n").reversed() {
             guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { continue }
             if cwd == nil, let c = obj["cwd"] as? String { cwd = c }
             if snippet == nil, let s = userText(from: obj) { snippet = s }
-            if cwd != nil && snippet != nil { break }
+            if lastActivity == nil, let raw = obj["timestamp"] as? String {
+                lastActivity = parseTimestamp(raw)
+            }
+            if cwd != nil && snippet != nil && lastActivity != nil { break }
         }
-        return (cwd, snippet)
+        return (cwd, snippet, lastActivity)
+    }
+
+    private static func parseTimestamp(_ raw: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: raw) { return date }
+        return ISO8601DateFormatter().date(from: raw)
     }
 
     /// 유저가 직접 친 메시지만 스니펫으로 — 도구 결과·커맨드 메타(<command-…>)·
