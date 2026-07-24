@@ -95,10 +95,10 @@ enum TmuxBootstrap {
     ///    허공을 가리켜 복원 전체가 즉사한다. 최신 실존 저장본으로 교정.
     /// 2) 서버 대기를 tmux 명령 없이 소켓 파일 폴링으로 — 폴링 프로세스가
     ///    conf 로드 시점에 잡히면 continuum 가드가 다중 서버로 오판한다.
-    ///    저장본이 있으면 90초까지 기다린다 (부팅 폭주에서 파이프라인은 느리다).
+    ///    저장본이 있으면 60초까지 기다린다 (부팅 폭주에서 파이프라인은 느리다).
     /// 3) birther는 그 뒤에도 서버가 없을 때만 깨운다 (파이프라인 부재 폴백).
-    ///    행이 걸려도 죽이지 않는다 — 미데몬화 서버를 물고 있으면 서버째 죽는다.
-    /// 4) 저장본에 이 세션명이 있으면 120초까지 생성하지 않는다 — 복원이 채울
+    ///    미데몬화 서버를 문 채 행할 수 있으므로 15초 watchdog으로 반드시 끝낸다.
+    /// 4) 저장본에 이 세션명이 있으면 60초까지 생성하지 않는다 — 복원이 채울
     ///    이름을 앱이 가로채는 게 사고의 본질이었다. 없으면 신규이니 짧게 대기 후 생성.
     static func coldBootScript(sessionName: String, workingDirectory: String, birther: Bool) -> String {
         let name = sessionName.shQuoted
@@ -106,7 +106,18 @@ enum TmuxBootstrap {
         let birthBlock = birther ? """
         if [ ! -S "$SOCK" ]; then
           tmux new-session -d -s __sm_boot -c \(dir) 2>/dev/null &
+          BIRTH_PID=$!
+          (
+            sleep 15
+            kill -TERM "$BIRTH_PID" 2>/dev/null
+            sleep 2
+            kill -KILL "$BIRTH_PID" 2>/dev/null
+          ) &
+          BIRTH_GUARD=$!
           j=0; while [ ! -S "$SOCK" ] && [ $j -lt 60 ]; do sleep 0.5; j=$((j+1)); done
+          wait "$BIRTH_PID" 2>/dev/null
+          kill "$BIRTH_GUARD" 2>/dev/null
+          wait "$BIRTH_GUARD" 2>/dev/null
         fi
         """ : """
         j=0; while [ ! -S "$SOCK" ] && [ $j -lt 70 ]; do sleep 0.5; j=$((j+1)); done
@@ -119,14 +130,14 @@ enum TmuxBootstrap {
           [ -n "$newest" ] && ln -sf "$(basename "$newest")" "$RES/last"
         fi
         SOCK="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/default"
-        PATIENCE=180; [ -e "$RES/last" ] || PATIENCE=20
+        PATIENCE=120; [ -e "$RES/last" ] || PATIENCE=20
         i=0
         while [ ! -S "$SOCK" ] && [ $i -lt $PATIENCE ]; do sleep 0.5; i=$((i+1)); done
         \(birthBlock)
         sleep 5
         WAIT=20
         if [ -e "$RES/last" ] && awk -F'\\t' -v n=\(name) '$1=="pane" && $2==n {f=1} END {exit !f}' "$RES/last" 2>/dev/null; then
-          WAIT=240
+          WAIT=120
         fi
         i=0
         until tmux has-session -t \(name) 2>/dev/null; do

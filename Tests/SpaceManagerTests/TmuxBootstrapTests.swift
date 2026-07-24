@@ -84,20 +84,28 @@ final class TmuxBootstrapTests: XCTestCase {
 
     // 재부팅 직전 저장이 유실되면 last가 댕글링 — 최신 실존 저장본으로 자가치유해야
     // 복원 파이프라인이 살아난다 (2026-07-24 사고 원인 ①)
-    func testColdBootHealsDanglingLastSymlink() {
+    func testColdBootRepairsDanglingLastSymlink() {
         let s = TmuxBootstrap.coldBootScript(sessionName: "ws", workingDirectory: "/tmp", birther: true)
         XCTAssertTrue(s.contains("[ -L \"$RES/last\" ] && [ ! -e \"$RES/last\" ]"))
+        XCTAssertTrue(s.contains("tmux_resurrect_*.txt"))
+        XCTAssertTrue(s.contains("head -1"))
         XCTAssertTrue(s.contains("ln -sf"))
     }
 
     // 저장본에 있는 세션명은 복원이 채울 이름이다 — 앱이 선점 생성하면 레이아웃이
     // 유실되고 에이전트 주입 좌표가 어긋난다 (사고 원인 ②). awk로 저장본을 검사해
-    // 있으면 오래(240폴), 없으면 짧게(20폴) 기다린 뒤에만 생성한다.
-    func testColdBootWaitsLongerForSavedSessions() {
-        let s = TmuxBootstrap.coldBootScript(sessionName: "ws", workingDirectory: "/tmp", birther: false)
+    // 있으면 60초(120폴), 없으면 짧게(20폴) 기다린 뒤에만 생성한다.
+    func testColdBootWaitsForRestoreAndTimesOutBirther() {
+        let s = TmuxBootstrap.coldBootScript(sessionName: "ws", workingDirectory: "/tmp", birther: true)
+        XCTAssertTrue(s.contains("PATIENCE=120"))
         XCTAssertTrue(s.contains("awk -F'\\t' -v n='ws'"))
-        XCTAssertTrue(s.contains("WAIT=240"))
+        XCTAssertTrue(s.contains("WAIT=120"))
         XCTAssertTrue(s.contains("WAIT=20"))
+        XCTAssertFalse(s.contains("pgrep"), "restore 프로세스가 아직 없다는 이유로 조기탈출하면 안 된다")
+        XCTAssertTrue(s.contains("BIRTH_PID=$!"))
+        XCTAssertTrue(s.contains("sleep 15"))
+        XCTAssertTrue(s.contains("kill -TERM \"$BIRTH_PID\""))
+        XCTAssertTrue(s.contains("kill -KILL \"$BIRTH_PID\""))
     }
 
     func testWorkspaceEffectiveSessionName() {
