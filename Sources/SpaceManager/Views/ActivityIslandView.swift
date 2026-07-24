@@ -125,7 +125,7 @@ struct IslandPanelView: View {
                 .transition(.scale(scale: 0.9, anchor: .top).combined(with: .opacity))
             }
         }
-        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: hover.isExpanded)
+        .animation(.spring(response: 0.25, dampingFraction: 0.82), value: hover.isExpanded)
         .animation(.easeInOut(duration: 0.2), value: scanner.sessions)
     }
 

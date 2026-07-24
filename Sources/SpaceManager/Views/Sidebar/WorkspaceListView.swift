@@ -58,7 +58,7 @@ struct WorkspaceListView: View {
                         onAddTmuxTab: { appState.selectWorkspace(workspace); appState.addTmuxTab() }
                     )
                     .onTapGesture {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                             appState.selectWorkspace(workspace)
                         }
                     }
@@ -124,7 +124,7 @@ struct WorkspaceListView: View {
                                 isSelected: appState.selectedSession?.id == session.id,
                                 animation: animation,
                                 onSelect: { 
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
                                         appState.selectSession(session)
                                     }
                                 },

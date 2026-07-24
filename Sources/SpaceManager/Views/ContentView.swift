@@ -43,12 +43,18 @@ struct ContentView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .shadow(color: Color.black.opacity(isDarkNow ? 0.3 : 0.1), radius: 8, x: 0, y: 4)
             }
-            // 캔버스 인셋
-            .padding(12)
+            // 캔버스 인셋: 신호등(Traffic Lights) 겹침 방지 및 테두리 여백
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
+            .padding(.top, 36)
             
-            // 확장 패널 (아일랜드)
-            IslandPanelView(scanner: activityScanner, hover: islandHover)
-                .padding(.top, 4)
+            // 확장 패널 (아일랜드) - 상단 중앙에 직접 배치
+            VStack(spacing: 8) {
+                IslandPillView(scanner: activityScanner, hover: islandHover)
+                    .padding(.top, 24)
+                
+                IslandPanelView(scanner: activityScanner, hover: islandHover)
+            }
         }
         .background {
             WindowBindingView(appState: appState, scanner: activityScanner, hover: islandHover)
@@ -71,33 +77,10 @@ struct ContentView: View {
             AddProjectSheet()
                 .environmentObject(appState)
         }
-        .navigationTitle(appState.selectedWorkspace?.name ?? "SpaceManager")
-        .toolbar {
-            if #available(macOS 26.0, *) {
-                ToolbarItem(placement: .primaryAction) {
-                    themeToggleButton
-                }
-                .sharedBackgroundVisibility(.hidden)
-            } else {
-                ToolbarItem(placement: .primaryAction) {
-                    themeToggleButton
-                }
-            }
-        }
         .onAppear {
             RecentActivityScanner.shared.start()
             WindowRestorer.openRemainingWindowsIfNeeded(openWindow)
         }
-    }
-
-    private var themeToggleButton: some View {
-        Button {
-            appState.setAppearance(isDarkNow ? "light" : "dark")
-        } label: {
-            Image(systemName: isDarkNow ? "sun.max" : "moon")
-        }
-        .buttonStyle(.plain)
-        .help(isDarkNow ? "라이트 모드로 전환" : "다크 모드로 전환")
     }
 }
 

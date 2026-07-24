@@ -23,7 +23,6 @@ struct WindowBindingView: NSViewRepresentable {
 final class WindowBindingNSView: NSView {
     private weak var appState: AppState?
     private weak var boundWindow: NSWindow?
-    private var overlay: TitlebarIslandOverlayView?
     private var scanner: RecentActivityScanner
     private var hover: IslandHoverState
 
@@ -40,7 +39,6 @@ final class WindowBindingNSView: NSView {
         self.appState = appState
         self.scanner = scanner
         self.hover = hover
-        overlay?.update(scanner: scanner, hover: hover)
         bindIfPossible()
     }
 
@@ -53,8 +51,6 @@ final class WindowBindingNSView: NSView {
         if let boundWindow, let appState {
             WorkspaceWindowRegistry.shared.detach(window: boundWindow, from: appState)
         }
-        overlay?.removeFromSuperview()
-        overlay = nil
         boundWindow = nil
     }
 
@@ -62,64 +58,8 @@ final class WindowBindingNSView: NSView {
         guard let window, let appState else { return }
         if let boundWindow, boundWindow !== window {
             WorkspaceWindowRegistry.shared.detach(window: boundWindow, from: appState)
-            overlay?.removeFromSuperview()
-            overlay = nil
         }
         boundWindow = window
         WorkspaceWindowRegistry.shared.attach(window: window, to: appState)
-        installOverlay(in: window)
-    }
-
-    private func installOverlay(in window: NSWindow) {
-        guard overlay == nil, let frameView = window.contentView?.superview else { return }
-        let titlebarHeight = max(38, frameView.bounds.height - window.contentLayoutRect.height)
-        let overlay = TitlebarIslandOverlayView(scanner: scanner, hover: hover)
-        overlay.frame = NSRect(
-            x: 0,
-            y: frameView.bounds.maxY - titlebarHeight,
-            width: frameView.bounds.width,
-            height: titlebarHeight
-        )
-        overlay.autoresizingMask = [.width, .minYMargin]
-        frameView.addSubview(overlay, positioned: .above, relativeTo: nil)
-        self.overlay = overlay
-    }
-}
-
-/// 사이드바와 detail을 모두 가로지르는 투명 타이틀바 레이어. 중앙 pill 영역만
-/// 이벤트를 받고 나머지는 nil을 반환해 창 드래그, 신호등, toolbar 버튼으로 통과시킨다.
-final class TitlebarIslandOverlayView: NSView {
-    private let host: NSHostingView<IslandPillView>
-
-    init(scanner: RecentActivityScanner, hover: IslandHoverState) {
-        host = NSHostingView(rootView: IslandPillView(scanner: scanner, hover: hover))
-        super.init(frame: .zero)
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.clear.cgColor
-        addSubview(host)
-    }
-
-    required init?(coder: NSCoder) { fatalError("not supported") }
-
-    func update(scanner: RecentActivityScanner, hover: IslandHoverState) {
-        host.rootView = IslandPillView(scanner: scanner, hover: hover)
-        needsLayout = true
-    }
-
-    override func layout() {
-        super.layout()
-        let size = host.fittingSize
-        host.frame = NSRect(
-            x: (bounds.width - size.width) / 2,
-            y: (bounds.height - size.height) / 2,
-            width: size.width,
-            height: size.height
-        )
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        let hostPoint = host.convert(point, from: self)
-        guard host.bounds.contains(hostPoint) else { return nil }
-        return host.hitTest(hostPoint)
     }
 }

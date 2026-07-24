@@ -7,6 +7,15 @@ import SwiftUI
 struct SidebarView: View {
     @EnvironmentObject var appState: AppState
 
+    private var isDarkNow: Bool {
+        switch appState.preferredAppearance {
+        case "light": return false
+        case "dark": return true
+        default:
+            return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Workspaces section — 고정 높이 + 자체 스크롤 (워크스페이스가 많아도 영역 불변)
@@ -22,6 +31,20 @@ struct SidebarView: View {
             ProjectListView()
 
             Spacer()
+
+            // Theme toggle at bottom
+            HStack {
+                Button {
+                    appState.setAppearance(isDarkNow ? "light" : "dark")
+                } label: {
+                    Image(systemName: isDarkNow ? "sun.max" : "moon")
+                }
+                .buttonStyle(.plain)
+                .help(isDarkNow ? "라이트 모드로 전환" : "다크 모드로 전환")
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
         }
         .frame(maxHeight: .infinity)
         .background(Color.panelDark)
