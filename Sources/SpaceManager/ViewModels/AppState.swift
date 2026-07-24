@@ -50,9 +50,11 @@ class AppState: ObservableObject {
             }
         }
         // 새 창은 빈 워크스페이스 목록으로 시작한다
+        WorkspaceWindowRegistry.shared.register(self)
     }
 
     deinit {
+        WorkspaceWindowRegistry.shared.unregister(self)
         // 창이 닫히면 그 창의 상태를 제거. 앱 종료 시에는 유지해야 하므로 가드
         // (macOS는 종료 시 deinit을 보장하지 않지만, 호출되는 경우를 방어)
         if !AppTermination.isTerminating {
