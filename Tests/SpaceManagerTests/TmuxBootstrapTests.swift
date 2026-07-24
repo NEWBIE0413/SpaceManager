@@ -108,6 +108,20 @@ final class TmuxBootstrapTests: XCTestCase {
         XCTAssertTrue(s.contains("kill -KILL \"$BIRTH_PID\""))
     }
 
+    // 서버 소켓이 생긴 뒤의 hung client는 미데몬화 서버를 붙들고 있을 수 있다.
+    // 이 경우 kill하면 서버도 함께 죽으므로, 소켓 부재일 때만 kill하고 그 외에는
+    // disown해서 복원 파이프라인을 계속 진행한다 (2026-07-24 실측).
+    func testColdBootBirtherKillRequiresMissingSocket() {
+        let s = TmuxBootstrap.coldBootScript(sessionName: "ws", workingDirectory: "/tmp", birther: true)
+        XCTAssertNotNil(s.range(
+            of: #"if \[ ! -S "\$SOCK" \]; then\s+kill -TERM"#,
+            options: .regularExpression
+        ))
+        XCTAssertTrue(s.contains("[ -S \"$SOCK\" ] || kill -KILL"))
+        XCTAssertTrue(s.contains("if [ -S \"$SOCK\" ]; then"))
+        XCTAssertTrue(s.contains("disown \"$BIRTH_PID\""))
+    }
+
     func testWorkspaceEffectiveSessionName() {
         var ws = Workspace(rootPath: "/tmp/My.Project")
         XCTAssertEqual(ws.effectiveTmuxSessionName, "My-Project")

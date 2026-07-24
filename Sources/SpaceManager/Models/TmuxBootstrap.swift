@@ -109,15 +109,22 @@ enum TmuxBootstrap {
           BIRTH_PID=$!
           (
             sleep 15
-            kill -TERM "$BIRTH_PID" 2>/dev/null
-            sleep 2
-            kill -KILL "$BIRTH_PID" 2>/dev/null
+            if [ ! -S "$SOCK" ]; then
+              kill -TERM "$BIRTH_PID" 2>/dev/null
+              sleep 2
+              [ -S "$SOCK" ] || kill -KILL "$BIRTH_PID" 2>/dev/null
+            fi
           ) &
           BIRTH_GUARD=$!
           j=0; while [ ! -S "$SOCK" ] && [ $j -lt 60 ]; do sleep 0.5; j=$((j+1)); done
-          wait "$BIRTH_PID" 2>/dev/null
-          kill "$BIRTH_GUARD" 2>/dev/null
-          wait "$BIRTH_GUARD" 2>/dev/null
+          if [ -S "$SOCK" ]; then
+            kill "$BIRTH_GUARD" 2>/dev/null
+            wait "$BIRTH_GUARD" 2>/dev/null
+            disown "$BIRTH_PID" 2>/dev/null || true
+          else
+            wait "$BIRTH_PID" 2>/dev/null
+            wait "$BIRTH_GUARD" 2>/dev/null
+          fi
         fi
         """ : """
         j=0; while [ ! -S "$SOCK" ] && [ $j -lt 70 ]; do sleep 0.5; j=$((j+1)); done
