@@ -1,7 +1,10 @@
 import XCTest
+import Combine
 @testable import SpaceManager
 
 final class QuickSessionTitleTests: XCTestCase {
+    private var cancellables: Set<AnyCancellable> = []
+
     func testSessionIdentityUsesPIDAndRejectsNonQuickCwd() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -68,5 +71,24 @@ final class QuickSessionTitleTests: XCTestCase {
         let titles = QuickConversationScanner.scanAITitles(directory: directory)
         session.updateQuickTitle(titlesBySessionId: titles)
         XCTAssertEqual(session.name, "Latest brief")
+    }
+
+    func testSelectedSessionTitleChangeInvalidatesWindowState() {
+        let state = AppState(windowKind: .quick)
+        let session = TerminalSession(
+            kind: .quick,
+            name: "q-1",
+            workingDirectory: "/tmp/cld"
+        )
+        state.selectedSession = session
+
+        let invalidated = expectation(description: "AppState forwards selected tab title")
+        state.objectWillChange
+            .sink { invalidated.fulfill() }
+            .store(in: &cancellables)
+
+        session.name = "Claude brief"
+
+        wait(for: [invalidated], timeout: 1)
     }
 }

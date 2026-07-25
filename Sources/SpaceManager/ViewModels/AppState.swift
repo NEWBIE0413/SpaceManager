@@ -15,9 +15,12 @@ class AppState: ObservableObject {
     @Published var selectedProject: Project?
 
     @Published var sessions: [TerminalSession] = []
-    @Published var selectedSession: TerminalSession?
+    @Published var selectedSession: TerminalSession? {
+        didSet { observeSelectedSession() }
+    }
     private var sessionsByWorkspace: [UUID: [TerminalSession]] = [:]
     private var selectedSessionIdByWorkspace: [UUID: UUID] = [:]
+    private var selectedSessionObservation: AnyCancellable?
 
     @Published var showNewWorkspaceSheet = false
     @Published var showAddProjectSheet = false
@@ -125,6 +128,16 @@ class AppState: ObservableObject {
         guard windowKind == .workspace else { return }
         preferredAppearance = raw
         persistWindowState()
+    }
+
+    private func observeSelectedSession() {
+        selectedSessionObservation = selectedSession?.objectWillChange.sink { [weak self] _ in
+            // TerminalSession.objectWillChange는 name 변경 직전에 오므로 새 값을 읽는
+            // 다음 main turn에 AppState를 무효화해 ContentView의 NSWindow.title도 갱신한다.
+            DispatchQueue.main.async {
+                self?.objectWillChange.send()
+            }
+        }
     }
 
     // MARK: - Workspace Management
