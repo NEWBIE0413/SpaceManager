@@ -7,7 +7,7 @@ struct TerminalAreaView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !TmuxBootstrap.isTmuxAvailable {
+            if appState.windowKind == .workspace && !TmuxBootstrap.isTmuxAvailable {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle")
                         .foregroundColor(.orange)
@@ -36,10 +36,10 @@ struct SingleTerminalView: View {
                 .id(session.id)
         } else {
             VStack {
-                Text("No terminal")
+                Text(appState.windowKind == .quick ? "No conversation" : "No terminal")
                     .foregroundColor(.secondary)
-                Button("New Terminal") {
-                    appState.addShellTab()
+                Button(appState.windowKind == .quick ? "New Conversation" : "New Terminal") {
+                    appState.addDefaultTab()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
