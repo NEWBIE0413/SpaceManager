@@ -42,14 +42,10 @@ struct ContentView: View {
         return appState.selectedWorkspace?.name ?? "SpaceManager"
     }
 
-    private var canvasGlassRole: GlassSurfaceRole {
-        isDarkNow ? .canvasDark : .canvasLight
-    }
-
     var body: some View {
         ZStack(alignment: .top) {
-            // 창 뒤 데스크톱을 직접 샘플링하는 옅은 캔버스 유리.
-            BehindWindowGlassSurface(role: canvasGlassRole)
+            // 메인 캔버스 배경 (다크모드/라이트모드 대응)
+            Color(nsColor: .windowBackgroundColor)
                 .ignoresSafeArea()
             
             HStack(spacing: 12) {

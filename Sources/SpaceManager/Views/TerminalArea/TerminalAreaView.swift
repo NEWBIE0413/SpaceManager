@@ -22,11 +22,7 @@ struct TerminalAreaView: View {
             }
             SingleTerminalView()
         }
-        // terminal.html의 WKWebView는 drawsBackground=false다. 카드 자체가 팔레트와
-        // 동일한 불투명색을 그려 behind-window 유리가 글자 뒤로 새지 않게 한다.
-        .background(
-            Color(nsColor: GlassSurfacePolicy.terminalCardColor(for: appState.windowKind))
-        )
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 }
 

@@ -47,7 +47,7 @@ struct SidebarView: View {
             .padding(.bottom, 16)
         }
         .frame(maxHeight: .infinity)
-        .background(BehindWindowGlassSurface(role: .workspaceSidebar))
+        .background(Color.panelDark)
         .environment(\.colorScheme, .dark)
     }
 }
