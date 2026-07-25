@@ -35,6 +35,13 @@ struct ContentView: View {
         }
     }
 
+    private var windowTitle: String {
+        if windowKind == .quick {
+            return appState.selectedSession?.name ?? "Hermes"
+        }
+        return appState.selectedWorkspace?.name ?? "SpaceManager"
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             // 메인 캔버스 배경 (다크모드/라이트모드 대응)
@@ -78,7 +85,12 @@ struct ContentView: View {
         // 위 HStack의 명시적 36pt inset 하나로만 관리한다.
         .ignoresSafeArea(.container, edges: .top)
         .background {
-            WindowBindingView(appState: appState, scanner: activityScanner, hover: islandHover)
+            WindowBindingView(
+                appState: appState,
+                scanner: activityScanner,
+                hover: islandHover,
+                title: windowTitle
+            )
                 .frame(width: 0, height: 0)
         }
         .environmentObject(appState)
