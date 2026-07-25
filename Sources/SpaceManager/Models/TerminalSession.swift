@@ -21,6 +21,7 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     /// tmuxMain/tmuxExtra가 attach할 세션명 (shell이면 nil)
     let tmuxSessionName: String?
     let quickLaunch: QuickLaunch?
+    let quickConfiguration: QuickSessionConfiguration
     private let initialName: String
 
     private(set) var terminalView: TerminalWebView?
@@ -32,7 +33,8 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
 
     init(id: UUID = UUID(), kind: TabKind, name: String,
          workingDirectory: String, tmuxSessionName: String? = nil,
-         quickLaunch: QuickLaunch? = nil) {
+         quickLaunch: QuickLaunch? = nil,
+         quickConfiguration: QuickSessionConfiguration = .default) {
         self.id = id
         self.kind = kind
         self.name = name
@@ -40,6 +42,7 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
         self.workingDirectory = workingDirectory
         self.tmuxSessionName = tmuxSessionName
         self.quickLaunch = quickLaunch
+        self.quickConfiguration = quickConfiguration
         self.quickSessionId = quickLaunch?.resumeSessionId
     }
 
@@ -79,9 +82,11 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
         if kind == .quick {
-            for (key, value) in QuickSessionPolicy.environment(for: quickLaunch ?? .blank) {
-                env[key] = value
-            }
+            env = QuickSessionPolicy.applyingEnvironment(
+                env,
+                launch: quickLaunch ?? .blank,
+                configuration: quickConfiguration
+            )
         }
 
         if kind == .quick {
@@ -93,7 +98,8 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
             kind: kind,
             tmuxSessionName: tmuxSessionName,
             workingDirectory: startDir,
-            quickLaunch: quickLaunch
+            quickLaunch: quickLaunch,
+            quickConfiguration: quickConfiguration
         )
 
         let pty = PTYProcess()
@@ -217,10 +223,14 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
         kind: TabKind,
         tmuxSessionName: String?,
         workingDirectory: String,
-        quickLaunch: QuickLaunch? = nil
+        quickLaunch: QuickLaunch? = nil,
+        quickConfiguration: QuickSessionConfiguration = .default
     ) -> [String] {
         if kind == .quick {
-            return ["-lc", QuickSessionPolicy.launchCommand(for: quickLaunch ?? .blank)]
+            return ["-lc", QuickSessionPolicy.launchCommand(
+                for: quickLaunch ?? .blank,
+                configuration: quickConfiguration
+            )]
         }
         if let tmuxSessionName {
             return ["-lc", TmuxBootstrap.startupScript(

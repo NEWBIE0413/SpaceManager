@@ -275,7 +275,8 @@ class AppState: ObservableObject {
     /// 폴더나 이름 입력 없이 홈에서 Claude 대화를 즉시 시작한다.
     func addQuickSession(
         initialPrompt: String? = nil,
-        resumeSessionId: String? = nil
+        resumeSessionId: String? = nil,
+        configuration: QuickSessionConfiguration = .default
     ) {
         guard windowKind == .quick else { return }
         let launch: QuickLaunch
@@ -292,7 +293,8 @@ class AppState: ObservableObject {
             kind: .quick,
             name: name,
             workingDirectory: QuickSessionPolicy.ensureWorkingDirectory(),
-            quickLaunch: launch
+            quickLaunch: launch,
+            quickConfiguration: configuration
         )
         sessions.append(session)
         selectSession(session)

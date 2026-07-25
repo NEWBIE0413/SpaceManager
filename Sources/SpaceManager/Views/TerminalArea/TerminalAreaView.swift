@@ -57,7 +57,11 @@ struct SingleTerminalView: View {
 /// 전달되며 셸 명령 문자열에는 절대 보간되지 않는다.
 struct QuickHomeView: View {
     @EnvironmentObject private var appState: AppState
+    @StateObject private var modelCatalog = QuickModelCatalog()
     @State private var prompt = ""
+    @State private var selectedModelID = QuickSessionConfiguration.default.modelID
+    @State private var selectedEffort = QuickSessionConfiguration.default.effort
+    @State private var proxyEnabled = false
     @FocusState private var isPromptFocused: Bool
 
     var body: some View {
@@ -98,7 +102,11 @@ struct QuickHomeView: View {
                 }
                 .frame(minHeight: 56, alignment: .topLeading)
 
-                HStack {
+                HStack(spacing: 10) {
+                    modelPicker
+                    effortPicker
+                    proxyButton
+
                     Spacer()
 
                     Button(action: submit) {
@@ -114,6 +122,11 @@ struct QuickHomeView: View {
                     .buttonStyle(.plain)
                     .disabled(trimmedPrompt.isEmpty)
                 }
+
+                Text(sessionModeDescription)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.secondary.opacity(0.72))
+                    .lineLimit(1)
             }
             .padding(20)
             .background(
@@ -130,7 +143,21 @@ struct QuickHomeView: View {
         .frame(maxWidth: 640)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(32)
-        .onAppear { isPromptFocused = true }
+        .onAppear {
+            isPromptFocused = true
+            modelCatalog.refresh()
+        }
+        .onChange(of: selectedModelID) { _, modelID in
+            if modelID.hasPrefix("claude-codex-") {
+                proxyEnabled = true
+            }
+        }
+        .onChange(of: modelCatalog.models) { _, models in
+            if !models.contains(where: { $0.id == selectedModelID }) {
+                selectedModelID = QuickSessionConfiguration.default.modelID
+                proxyEnabled = false
+            }
+        }
     }
 
     private var trimmedPrompt: String {
@@ -141,7 +168,112 @@ struct QuickHomeView: View {
         let initialPrompt = trimmedPrompt
         guard !initialPrompt.isEmpty else { return }
         prompt = ""
-        appState.addQuickSession(initialPrompt: initialPrompt)
+        appState.addQuickSession(
+            initialPrompt: initialPrompt,
+            configuration: QuickSessionConfiguration(
+                modelID: selectedModelID,
+                effort: selectedEffort,
+                proxyEnabled: proxyEnabled
+            )
+        )
+    }
+
+    private var selectedModel: QuickModelOption {
+        modelCatalog.models.first(where: { $0.id == selectedModelID })
+            ?? QuickModelCatalog.fallbackModels[1]
+    }
+
+    private var modelPicker: some View {
+        Menu {
+            Picker("모델", selection: $selectedModelID) {
+                Section("Claude") {
+                    ForEach(modelCatalog.models.filter { !$0.isCodex }) { model in
+                        Text(model.displayName).tag(model.id)
+                    }
+                }
+                let codexModels = modelCatalog.models.filter(\.isCodex)
+                if !codexModels.isEmpty {
+                    Section("Codex · 프록시") {
+                        ForEach(codexModels) { model in
+                            Text(model.displayName).tag(model.id)
+                        }
+                    }
+                }
+            }
+        } label: {
+            pickerLabel(selectedModel.displayName, icon: "sparkle")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help(modelCatalog.routerAvailable ? "대화 모델 선택" : "라우터 오프라인 — Claude 모델만 사용 가능")
+    }
+
+    private var effortPicker: some View {
+        Menu {
+            Picker("Effort", selection: $selectedEffort) {
+                ForEach(QuickEffort.allCases) { effort in
+                    Text(effort.displayName).tag(effort)
+                }
+            }
+        } label: {
+            pickerLabel(selectedEffort.displayName, icon: "dial.medium")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("응답 생성 effort")
+    }
+
+    private var proxyButton: some View {
+        let isCodex = selectedModel.isCodex
+        return Button {
+            guard modelCatalog.routerAvailable, !isCodex else { return }
+            proxyEnabled.toggle()
+        } label: {
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(proxyEnabled ? .primary : .secondary.opacity(0.72))
+                .frame(width: 27, height: 25)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.primary.opacity(proxyEnabled ? 0.10 : 0.045))
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(!modelCatalog.routerAvailable || isCodex)
+        .help(isCodex ? "Codex 모델은 프록시 세션이 필수입니다" : "세션 내 Claude↔Codex 전환 허용")
+    }
+
+    private func pickerLabel(_ title: String, icon: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 7, weight: .bold))
+                .foregroundColor(.secondary.opacity(0.65))
+        }
+        .foregroundColor(.secondary)
+        .padding(.horizontal, 9)
+        .frame(height: 25)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color.primary.opacity(0.045))
+        )
+    }
+
+    private var sessionModeDescription: String {
+        if modelCatalog.isLoading {
+            return "모델 목록 확인 중"
+        }
+        if !modelCatalog.routerAvailable {
+            return "라우터 오프라인 · Claude 직결만 사용 가능"
+        }
+        if selectedModel.isCodex || proxyEnabled {
+            return "프록시 세션 · /model에서 Claude↔Codex 전환 가능"
+        }
+        return "Claude 직결 · 세션 안에서 Codex 전환 불가"
     }
 }
 

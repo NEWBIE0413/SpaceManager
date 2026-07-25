@@ -13,7 +13,7 @@ final class QuickSessionTests: XCTestCase {
                 tmuxSessionName: nil,
                 workingDirectory: QuickSessionPolicy.workingDirectory
             ),
-            ["-lc", "exec ccv -y"]
+            ["-lc", #"exec ccv -y --model "$SM_MODEL" --effort "$SM_EFFORT""#]
         )
     }
 
@@ -27,12 +27,14 @@ final class QuickSessionTests: XCTestCase {
                 workingDirectory: QuickSessionPolicy.workingDirectory,
                 quickLaunch: launch
             ),
-            ["-lc", #"exec ccv -y "$SM_INITIAL_PROMPT""#]
+            ["-lc", #"exec ccv -y --model "$SM_MODEL" --effort "$SM_EFFORT" "$SM_INITIAL_PROMPT""#]
         )
         XCTAssertEqual(
             QuickSessionPolicy.environment(for: launch)["SM_INITIAL_PROMPT"],
             prompt
         )
+        XCTAssertEqual(QuickSessionPolicy.environment(for: launch)["SM_MODEL"], "claude-sonnet-5")
+        XCTAssertEqual(QuickSessionPolicy.environment(for: launch)["SM_EFFORT"], "high")
         XCTAssertFalse(QuickSessionPolicy.launchCommand(for: launch).contains("touch"))
         XCTAssertTrue(QuickSessionPolicy.workingDirectory.hasSuffix("/cld"))
     }
@@ -47,12 +49,41 @@ final class QuickSessionTests: XCTestCase {
                 workingDirectory: QuickSessionPolicy.workingDirectory,
                 quickLaunch: launch
             ),
-            ["-lc", #"exec ccv -ry "$SM_RESUME_SESSION_ID""#]
+            ["-lc", #"exec ccv -ry "$SM_RESUME_SESSION_ID" --model "$SM_MODEL" --effort "$SM_EFFORT""#]
         )
         XCTAssertEqual(
             QuickSessionPolicy.environment(for: launch)["SM_RESUME_SESSION_ID"],
             sessionId
         )
+    }
+
+    func testQuickProxyEnvironmentIsOnlyInjectedForProxySessions() {
+        let inherited = [
+            "PATH": "/usr/bin",
+            "ANTHROPIC_BASE_URL": "http://stale.example",
+            "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
+        ]
+        let direct = QuickSessionPolicy.applyingEnvironment(
+            inherited,
+            launch: .blank,
+            configuration: .default
+        )
+        XCTAssertNil(direct["ANTHROPIC_BASE_URL"])
+        XCTAssertNil(direct["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"])
+
+        let proxy = QuickSessionPolicy.applyingEnvironment(
+            inherited,
+            launch: .blank,
+            configuration: QuickSessionConfiguration(
+                modelID: "claude-codex-gpt-5.6-terra",
+                effort: .xhigh,
+                proxyEnabled: false
+            )
+        )
+        XCTAssertEqual(proxy["ANTHROPIC_BASE_URL"], "http://127.0.0.1:4141")
+        XCTAssertEqual(proxy["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"], "1")
+        XCTAssertEqual(proxy["SM_MODEL"], "claude-codex-gpt-5.6-terra")
+        XCTAssertEqual(proxy["SM_EFFORT"], "xhigh")
     }
 
     func testQuickCloseHasNoPersistentTabsOrTmuxIdentity() throws {
