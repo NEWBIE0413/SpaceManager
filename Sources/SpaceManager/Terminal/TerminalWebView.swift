@@ -83,6 +83,7 @@ final class TerminalWebView: NSView {
     private(set) var lastCols: UInt16 = 80
     private(set) var lastRows: UInt16 = 24
 
+    private let palette: TerminalPalette
     private let webView: WKWebView
     private var isReady = false
     private var pendingOutput = Data()
@@ -90,7 +91,12 @@ final class TerminalWebView: NSView {
     private var flushScheduled = false
     private var lastFlushTime: CFTimeInterval = 0
 
-    override init(frame: NSRect) {
+    override convenience init(frame: NSRect) {
+        self.init(frame: frame, palette: .workspaceDark)
+    }
+
+    init(frame: NSRect, palette: TerminalPalette) {
+        self.palette = palette
         let config = WKWebViewConfiguration()
         webView = WKWebView(frame: frame, configuration: config)
         super.init(frame: frame)
@@ -194,15 +200,10 @@ final class TerminalWebView: NSView {
         }
     }
 
-    /// 터미널 팔레트는 항상 다크 고정 — 색 보정 레이어를 tmux 하나로 줄이기 위한 결정.
-    ///
-    /// claude/codex 같은 harness는 다크 배경을 전제로 ANSI 색을 명시해 찍고,
-    /// tmux가 그 위에서 한 번 보정한다. 여기에 앱 테마까지 배경을 흰색으로
-    /// 뒤집으면(ANSI 16색은 그대로인 채) 세 번째 보정 레이어가 생겨 라이트/다크를
-    /// 오갈 때마다 어긋난다. 앱의 라이트/다크는 크롬(타이틀바·시트)만 바꾸고
-    /// 터미널 픽셀은 건드리지 않는다.
+    /// 워크스페이스는 기존 다크를 유지하고, tmux를 쓰지 않는 Quick만 전체
+    /// 라이트 ANSI 팔레트를 쓴다. 색상 선택은 TerminalPalette 한 경로에 모은다.
     private func applyTheme() {
-        let theme = "{\"background\":\"#1e1e1e\",\"foreground\":\"#d4d4d4\",\"cursor\":\"#d4d4d4\",\"selectionBackground\":\"#264f78\"}"
+        guard let theme = palette.json else { return }
         webView.evaluateJavaScript("window.smSetTheme(\(theme))", completionHandler: nil)
     }
 

@@ -35,7 +35,8 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
 
     func getOrCreateTerminal() -> TerminalWebView {
         if let existing = terminalView { return existing }
-        let view = TerminalWebView(frame: .zero)
+        let palette: TerminalPalette = kind == .quick ? .quickLight : .workspaceDark
+        let view = TerminalWebView(frame: .zero, palette: palette)
         view.translatesAutoresizingMaskIntoConstraints = false
         view.onUserInput = { [weak self] data in self?.pty?.write(data) }
         view.onResize = { [weak self] cols, rows in self?.pty?.resize(cols: cols, rows: rows) }
