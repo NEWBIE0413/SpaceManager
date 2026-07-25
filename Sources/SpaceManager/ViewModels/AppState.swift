@@ -260,17 +260,34 @@ class AppState: ObservableObject {
     }
 
     /// 폴더나 이름 입력 없이 홈에서 Claude 대화를 즉시 시작한다.
-    func addQuickSession() {
+    func addQuickSession(
+        initialPrompt: String? = nil,
+        resumeSessionId: String? = nil
+    ) {
         guard windowKind == .quick else { return }
+        let launch: QuickLaunch
+        if let resumeSessionId, UUID(uuidString: resumeSessionId) != nil {
+            launch = .resume(sessionId: resumeSessionId)
+        } else if let initialPrompt {
+            let trimmed = initialPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            launch = trimmed.isEmpty ? .blank : .initialPrompt(trimmed)
+        } else {
+            launch = .blank
+        }
         let name = QuickSessionPolicy.nextName(usedNames: Set(sessions.map(\.name)))
         let session = TerminalSession(
             kind: .quick,
             name: name,
-            workingDirectory: NSHomeDirectory()
+            workingDirectory: QuickSessionPolicy.ensureWorkingDirectory(),
+            quickLaunch: launch
         )
         sessions.append(session)
         selectSession(session)
         session.startQuickImmediately()
+    }
+
+    func resumeQuickConversation(sessionId: String) {
+        addQuickSession(resumeSessionId: sessionId)
     }
 
     /// 추가 tmux 탭 — <세션명>-2, -3, … 자동 넘버링

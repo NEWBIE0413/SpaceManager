@@ -19,18 +19,21 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     var workingDirectory: String
     /// tmuxMain/tmuxExtra가 attach할 세션명 (shell이면 nil)
     let tmuxSessionName: String?
+    let quickLaunch: QuickLaunch?
 
     private(set) var terminalView: TerminalWebView?
     private var pty: PTYProcess?
     private var started = false
 
     init(id: UUID = UUID(), kind: TabKind, name: String,
-         workingDirectory: String, tmuxSessionName: String? = nil) {
+         workingDirectory: String, tmuxSessionName: String? = nil,
+         quickLaunch: QuickLaunch? = nil) {
         self.id = id
         self.kind = kind
         self.name = name
         self.workingDirectory = workingDirectory
         self.tmuxSessionName = tmuxSessionName
+        self.quickLaunch = quickLaunch
     }
 
     func getOrCreateTerminal() -> TerminalWebView {
@@ -68,13 +71,22 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
         var env = ProcessInfo.processInfo.environment
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
+        if kind == .quick {
+            for (key, value) in QuickSessionPolicy.environment(for: quickLaunch ?? .blank) {
+                env[key] = value
+            }
+        }
 
+        if kind == .quick {
+            workingDirectory = QuickSessionPolicy.ensureWorkingDirectory()
+        }
         let startDir = FileManager.default.fileExists(atPath: workingDirectory)
             ? workingDirectory : NSHomeDirectory()
         let arguments = Self.launchArguments(
             kind: kind,
             tmuxSessionName: tmuxSessionName,
-            workingDirectory: startDir
+            workingDirectory: startDir,
+            quickLaunch: quickLaunch
         )
 
         let pty = PTYProcess()
@@ -138,10 +150,11 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     static func launchArguments(
         kind: TabKind,
         tmuxSessionName: String?,
-        workingDirectory: String
+        workingDirectory: String,
+        quickLaunch: QuickLaunch? = nil
     ) -> [String] {
         if kind == .quick {
-            return ["-lc", QuickSessionPolicy.launchCommand]
+            return ["-lc", QuickSessionPolicy.launchCommand(for: quickLaunch ?? .blank)]
         }
         if let tmuxSessionName {
             return ["-lc", TmuxBootstrap.startupScript(
