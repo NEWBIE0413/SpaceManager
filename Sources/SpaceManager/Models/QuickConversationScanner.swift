@@ -25,9 +25,17 @@ final class QuickConversationScanner: ObservableObject {
     private var cache: [String: CacheEntry] = [:]
     private var timer: Timer?
 
-    init(transcriptsDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".claude/projects/-Users-tmdgus-cld", isDirectory: true)) {
+    init(transcriptsDirectory: URL = Self.defaultTranscriptsDirectory()) {
         self.transcriptsDirectory = transcriptsDirectory
+    }
+
+    private static func defaultTranscriptsDirectory() -> URL {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let quickDirectory = home.appendingPathComponent("cld", isDirectory: true)
+        let encodedProjectPath = quickDirectory.path.replacingOccurrences(of: "/", with: "-")
+        return home
+            .appendingPathComponent(".claude/projects", isDirectory: true)
+            .appendingPathComponent(encodedProjectPath, isDirectory: true)
     }
 
     func start() {
