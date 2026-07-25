@@ -40,6 +40,14 @@ final class GlassSurfaceTests: XCTestCase {
             GlassSurfacePolicy.tintColor(for: .canvasDark).alphaComponent,
             GlassSurfacePolicy.tintColor(for: .workspaceSidebar).alphaComponent
         )
+        XCTAssertLessThan(
+            GlassSurfacePolicy.surfaceOpacity(for: .canvasLight),
+            GlassSurfacePolicy.surfaceOpacity(for: .quickSidebar)
+        )
+        XCTAssertLessThan(
+            GlassSurfacePolicy.surfaceOpacity(for: .workspaceSidebar),
+            1
+        )
         XCTAssertEqual(GlassSurfacePolicy.cornerRadius(for: .quickSidebar), 16)
         XCTAssertEqual(GlassSurfacePolicy.cornerRadius(for: .canvasLight), 0)
         XCTAssertEqual(
