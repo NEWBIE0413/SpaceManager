@@ -1,6 +1,13 @@
 import AppKit
 import SwiftUI
 
+enum WindowSurfacePolicy {
+    static func configure(_ window: NSWindow) {
+        window.isOpaque = false
+        window.backgroundColor = .clear
+    }
+}
+
 /// 창별 AppState를 실제 NSWindow에 연결하는 보이지 않는 브리지.
 struct WindowBindingView: NSViewRepresentable {
     let appState: AppState
@@ -73,6 +80,7 @@ final class WindowBindingNSView: NSView {
         window.styleMask.insert(.fullSizeContentView)
         window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = true
+        WindowSurfacePolicy.configure(window)
         // titlebar가 보이지 않아도 Mission Control, Dock, 창 전환기는 이 값을 쓴다.
         // ContentView가 AppState 변경을 관찰해 updateNSView를 다시 호출하므로
         // 워크스페이스 전환과 같은 렌더 사이클에 창 제목도 갱신된다.

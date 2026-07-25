@@ -97,7 +97,7 @@ struct QuickSidebarView: View {
             .frame(maxHeight: .infinity, alignment: .top)
         }
         .frame(maxHeight: .infinity)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(BehindWindowGlassSurface(role: .quickSidebar))
         .onAppear {
             recentScanner.start()
             recentScanner.rescan()
