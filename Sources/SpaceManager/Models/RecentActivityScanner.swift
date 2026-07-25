@@ -268,7 +268,7 @@ final class RecentActivityScanner: ObservableObject {
 
     /// 유저가 직접 친 메시지만 스니펫으로 — 도구 결과·커맨드 메타(<command-…>)·
     /// 인터럽트 마커는 "무슨 작업이었는지"를 말해주지 않는다.
-    private static func userText(from obj: [String: Any]) -> String? {
+    static func userText(from obj: [String: Any]) -> String? {
         guard obj["type"] as? String == "user",
               let message = obj["message"] as? [String: Any],
               let content = message["content"] as? String else { return nil }
