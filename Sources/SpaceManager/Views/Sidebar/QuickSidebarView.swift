@@ -4,10 +4,11 @@ import SwiftUI
 struct QuickSidebarView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var recentScanner = QuickConversationScanner.shared
+    @State private var isHoveringNew = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SidebarSectionHeader(title: "새로 생성") {
+            QuickSectionHeader(title: "새로 생성") {
                 Button {
                     appState.showQuickHome()
                 } label: {
@@ -21,17 +22,29 @@ struct QuickSidebarView: View {
             Button {
                 appState.showQuickHome()
             } label: {
-                Label("새 대화", systemImage: "square.and.pencil")
-                    .font(.system(size: 13, weight: .medium))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, Sidebar.rowVerticalPadding)
-                    .padding(.horizontal, Sidebar.rowHorizontalPadding)
-                    .contentShape(Rectangle())
+                HStack(spacing: 8) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: Sidebar.iconSize))
+                        .foregroundColor(.primary)
+                        .frame(width: Sidebar.iconFrame)
+                    Text("새 대화")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.primary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, Sidebar.rowVerticalPadding)
+                .padding(.horizontal, Sidebar.rowHorizontalPadding)
+                .background(
+                    RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius, style: .continuous)
+                        .fill(isHoveringNew ? Color.primary.opacity(0.06) : Color.primary.opacity(0.03))
+                )
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 8)
+            .onHover { isHoveringNew = $0 }
 
-            SidebarSectionHeader(title: "열린 대화") {
+            QuickSectionHeader(title: "열린 대화") {
                 EmptyView()
             }
 
@@ -49,7 +62,11 @@ struct QuickSidebarView: View {
                                 QuickSessionRow(
                                     session: session,
                                     isSelected: appState.selectedSession?.id == session.id,
-                                    onSelect: { appState.selectSession(session) },
+                                    onSelect: {
+                                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                                            appState.selectSession(session)
+                                        }
+                                    },
                                     onClose: { appState.removeQuickSession(session) }
                                 )
                             }
@@ -60,7 +77,7 @@ struct QuickSidebarView: View {
             }
             .frame(maxHeight: 220)
 
-            SidebarSectionHeader(title: "최근 항목") {
+            QuickSectionHeader(title: "최근 항목") {
                 Button {
                     recentScanner.rescan()
                 } label: {
@@ -137,15 +154,20 @@ private struct QuickSessionRow: View {
             }
             .buttonStyle(.plain)
             .help("대화 종료")
+            .opacity(isHovering || isSelected ? 1 : 0)
         }
         .padding(.vertical, Sidebar.rowVerticalPadding)
         .padding(.horizontal, Sidebar.rowHorizontalPadding)
-        .background(
-            RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius, style: .continuous)
-                .fill(isSelected
-                      ? Color.primary.opacity(0.08)
-                      : (isHovering ? Color.primary.opacity(0.04) : Color.clear))
-        )
+        .background {
+            if isSelected {
+                RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius, style: .continuous)
+                    .fill(Color(nsColor: .textBackgroundColor))
+                    .shadow(color: Color.black.opacity(0.06), radius: 3, x: 0, y: 1)
+            } else if isHovering {
+                RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius, style: .continuous)
+                    .fill(Color.primary.opacity(0.04))
+            }
+        }
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .onTapGesture(perform: onSelect)
@@ -159,23 +181,22 @@ private struct QuickRecentConversationRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "clock.arrow.circlepath")
+            Image(systemName: "bubble.left")
                 .font(.system(size: Sidebar.iconSize))
-                .foregroundColor(.secondary)
+                .foregroundColor(.secondary.opacity(0.8))
                 .frame(width: Sidebar.iconFrame)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(conversation.title)
-                    .font(.system(size: 13))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
+            Text(conversation.title)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundColor(.primary.opacity(0.9))
+                .lineLimit(1)
 
-                Text(relativeTime(conversation.modifiedAt))
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-            }
+            Spacer(minLength: 4)
 
-            Spacer(minLength: 0)
+            Text(relativeTime(conversation.modifiedAt))
+                .font(.system(size: 10))
+                .foregroundColor(.secondary.opacity(0.6))
+                .monospacedDigit()
         }
         .padding(.vertical, Sidebar.rowVerticalPadding)
         .padding(.horizontal, Sidebar.rowHorizontalPadding)
@@ -185,7 +206,11 @@ private struct QuickRecentConversationRow: View {
         )
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
-        .onTapGesture(perform: onResume)
+        .onTapGesture {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                onResume()
+            }
+        }
         .help("이 대화 재개")
     }
 

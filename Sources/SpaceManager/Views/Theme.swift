@@ -42,6 +42,26 @@ struct SidebarSectionHeader<Trailing: View>: View {
     }
 }
 
+/// 헤르메스(Quick) 창 전용 사이드바 섹션 헤더 — claude.ai 데스크톱 감성(작고 옅은 라벨 위계)
+struct QuickSectionHeader<Trailing: View>: View {
+    let title: String
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(0.3)
+                .foregroundColor(.secondary.opacity(0.85))
+            Spacer()
+            trailing
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 6)
+    }
+}
+
 /// 라이트/다크는 창별이다 — ContentView의 preferredColorScheme이 창(씬) 단위로
 /// 적용한다. 여기는 tmux 쪽 연동만 남는다.
 enum AppearanceManager {

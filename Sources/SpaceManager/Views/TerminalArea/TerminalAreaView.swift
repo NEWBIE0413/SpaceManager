@@ -57,39 +57,69 @@ struct QuickHomeView: View {
     @FocusState private var isPromptFocused: Bool
 
     var body: some View {
-        VStack(spacing: 22) {
+        VStack(spacing: 28) {
             VStack(spacing: 8) {
-                Text("새 대화를 시작하세요")
-                    .font(.system(size: 28, weight: .semibold))
-                Text("무엇을 도와드릴까요?")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-            }
-
-            HStack(alignment: .bottom, spacing: 12) {
-                TextField("메시지를 입력하세요", text: $prompt, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 16))
-                    .lineLimit(2...7)
-                    .focused($isPromptFocused)
-                    .onSubmit(submit)
-
-                Button(action: submit) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white)
-                        .frame(width: 30, height: 30)
-                        .background(Circle().fill(Color.black))
+                HStack(spacing: 10) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundColor(Color(red: 0.92, green: 0.45, blue: 0.35))
+                    Text("새 대화 시작")
+                        .font(.system(size: 30, weight: .semibold))
+                        .foregroundColor(.primary)
                 }
-                .buttonStyle(.plain)
-                .disabled(trimmedPrompt.isEmpty)
+                Text("무엇을 도와드릴까요?")
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundColor(.secondary.opacity(0.85))
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 15)
+
+            VStack(alignment: .leading, spacing: 14) {
+                ZStack(alignment: .topLeading) {
+                    if prompt.isEmpty {
+                        Text("메시지를 입력하세요...")
+                            .font(.system(size: 16, weight: .regular))
+                            .foregroundColor(Color.secondary.opacity(0.55))
+                            .padding(.top, 2)
+                            .padding(.leading, 4)
+                            .allowsHitTesting(false)
+                    }
+
+                    TextField("", text: $prompt, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 16, weight: .regular))
+                        .lineLimit(3...10)
+                        .focused($isPromptFocused)
+                        .onSubmit(submit)
+                        .padding(.horizontal, 4)
+                }
+                .frame(minHeight: 56, alignment: .topLeading)
+
+                HStack {
+                    Spacer()
+
+                    Button(action: submit) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(trimmedPrompt.isEmpty ? Color.secondary.opacity(0.4) : Color.white)
+                            .frame(width: 32, height: 32)
+                            .background(
+                                Circle().fill(trimmedPrompt.isEmpty ? Color.primary.opacity(0.08) : Color.black)
+                            )
+                            .animation(.spring(response: 0.25, dampingFraction: 0.82), value: trimmedPrompt.isEmpty)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(trimmedPrompt.isEmpty)
+                }
+            }
+            .padding(20)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .fill(Color(nsColor: .textBackgroundColor))
-                    .shadow(color: Color.black.opacity(0.08), radius: 12, y: 4)
+                    .shadow(color: Color.black.opacity(0.04), radius: 3, y: 1)
+                    .shadow(color: Color.black.opacity(0.08), radius: 24, y: 8)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.black.opacity(0.06), lineWidth: 1)
             )
         }
         .frame(maxWidth: 640)
