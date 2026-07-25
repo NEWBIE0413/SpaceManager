@@ -25,24 +25,11 @@ enum GlassSurfacePolicy {
         case .canvasDark:
             return NSColor(srgbRed: 0.035, green: 0.04, blue: 0.05, alpha: 0.18)
         case .canvasLight:
-            return NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.08)
+            return NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.12)
         case .workspaceSidebar:
-            return NSColor(srgbRed: 0.025, green: 0.028, blue: 0.035, alpha: 0.42)
+            return NSColor(srgbRed: 0.025, green: 0.028, blue: 0.035, alpha: 0.58)
         case .quickSidebar:
-            return NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.24)
-        }
-    }
-
-    static func surfaceOpacity(for role: GlassSurfaceRole) -> CGFloat {
-        switch role {
-        case .canvasDark:
-            return 0.72
-        case .canvasLight:
-            return 0.62
-        case .workspaceSidebar:
-            return 0.82
-        case .quickSidebar:
-            return 0.70
+            return NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.38)
         }
     }
 
@@ -92,7 +79,6 @@ final class BehindWindowGlassNSView: NSVisualEffectView {
 
     func configure(role: GlassSurfaceRole) {
         material = GlassSurfacePolicy.material(for: role)
-        alphaValue = GlassSurfacePolicy.surfaceOpacity(for: role)
 
         if #available(macOS 26.0, *) {
             let glass: NSGlassEffectView
