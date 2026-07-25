@@ -16,8 +16,8 @@ struct ProjectListView: View {
                 } else {
                     SidebarSectionHeader(title: "FILES") { EmptyView() }
                     Text("Select a workspace")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary.opacity(0.9))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 4)
                 }
@@ -50,8 +50,8 @@ private struct ProjectFileBrowser: View {
                     }
                 } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.secondary)
+                        .font(.system(size: Sidebar.iconSize, weight: .medium))
+                        .foregroundColor(.secondary.opacity(0.9))
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
@@ -69,8 +69,8 @@ private struct ProjectFileBrowser: View {
                     .padding(.vertical, 6)
             } else if items.isEmpty {
                 Text("No files")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary.opacity(0.9))
                     .padding(.horizontal, 16)
                     .padding(.vertical, 4)
             } else {
@@ -265,8 +265,8 @@ private struct FileNodeView: View {
                             }
                     } else if children.isEmpty {
                         Text("Empty")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.secondary.opacity(0.9))
                             .padding(.leading, 20)
                     } else {
                         ForEach(children) { child in
@@ -342,13 +342,13 @@ private struct FileRowView: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: item.isExpandable ? "folder" : "doc.text")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-                .frame(width: 14)
+                .font(.system(size: Sidebar.iconSize, weight: .medium))
+                .foregroundColor(.secondary.opacity(0.9))
+                .frame(width: Sidebar.iconFrame)
 
             Text(item.name)
-                .font(.system(size: 12))
-                .foregroundColor(.primary.opacity(0.9))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.primary.opacity(0.95))
                 .lineLimit(1)
 
             Spacer(minLength: 0)
@@ -358,7 +358,7 @@ private struct FileRowView: View {
         .padding(.horizontal, 6)
         .background(
             RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius)
-                .fill(isHovering ? Color.primary.opacity(0.04) : Color.clear)
+                .fill(isHovering ? Color.white.opacity(0.04) : Color.clear)
         )
         .onHover { isHovering = $0 }
         .contentShape(Rectangle())

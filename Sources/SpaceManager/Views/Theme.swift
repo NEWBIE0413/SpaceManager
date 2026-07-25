@@ -29,7 +29,7 @@ struct SidebarSectionHeader<Trailing: View>: View {
             Text(title)
                 .font(.system(size: 11, weight: .bold))
                 .tracking(0.6)
-                .foregroundColor(.warmPinkMuted)
+                .foregroundColor(.secondary.opacity(0.95))
             Spacer()
             trailing
         }
@@ -47,9 +47,9 @@ struct QuickSectionHeader<Trailing: View>: View {
     var body: some View {
         HStack {
             Text(title)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 11, weight: .bold))
                 .tracking(0.3)
-                .foregroundColor(.secondary.opacity(0.85))
+                .foregroundColor(.secondary.opacity(0.95))
             Spacer()
             trailing
         }

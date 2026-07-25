@@ -25,7 +25,7 @@ struct QuickSidebarView: View {
                 .padding(.horizontal, Sidebar.rowHorizontalPadding)
                 .background(
                     RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius, style: .continuous)
-                        .fill(isHoveringNew ? Color.primary.opacity(0.06) : Color.primary.opacity(0.03))
+                        .fill(isHoveringNew ? Color.primary.opacity(0.04) : Color.primary.opacity(0.02))
                 )
                 .contentShape(Rectangle())
             }
@@ -46,7 +46,7 @@ struct QuickSidebarView: View {
                                 session: session,
                                 isSelected: appState.selectedSession?.id == session.id,
                                 onSelect: {
-                                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 1.0)) {
                                         appState.selectSession(session)
                                     }
                                 },
@@ -64,7 +64,8 @@ struct QuickSidebarView: View {
                     recentScanner.rescan()
                 } label: {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary.opacity(0.9))
                 }
                 .buttonStyle(.plain)
                 .help("최근 대화 새로고침")
@@ -73,8 +74,8 @@ struct QuickSidebarView: View {
             Group {
                 if recentScanner.conversations.isEmpty {
                     Text("최근 대화가 없습니다")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary.opacity(0.9))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -115,12 +116,12 @@ private struct QuickSessionRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "bubble.left")
-                .font(.system(size: Sidebar.iconSize))
-                .foregroundColor(.secondary)
+                .font(.system(size: Sidebar.iconSize, weight: .medium))
+                .foregroundColor(.secondary.opacity(0.9))
                 .frame(width: Sidebar.iconFrame)
 
             Text(session.name)
-                .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                .font(.system(size: 13, weight: isSelected ? .bold : .medium))
                 .foregroundColor(.primary)
 
             Spacer(minLength: 0)
@@ -132,7 +133,7 @@ private struct QuickSessionRow: View {
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.secondary.opacity(0.9))
                     .frame(width: 18, height: 18)
                     .contentShape(Rectangle())
             }
@@ -166,20 +167,20 @@ private struct QuickRecentConversationRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "bubble.left")
-                .font(.system(size: Sidebar.iconSize))
-                .foregroundColor(.secondary.opacity(0.8))
+                .font(.system(size: Sidebar.iconSize, weight: .medium))
+                .foregroundColor(.secondary.opacity(0.9))
                 .frame(width: Sidebar.iconFrame)
 
             Text(conversation.title)
-                .font(.system(size: 13, weight: .regular))
-                .foregroundColor(.primary.opacity(0.9))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.primary.opacity(0.95))
                 .lineLimit(1)
 
             Spacer(minLength: 4)
 
             Text(relativeTime(conversation.modifiedAt))
-                .font(.system(size: 10))
-                .foregroundColor(.secondary.opacity(0.6))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.secondary.opacity(0.85))
                 .monospacedDigit()
         }
         .padding(.vertical, Sidebar.rowVerticalPadding)
@@ -191,7 +192,7 @@ private struct QuickRecentConversationRow: View {
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .onTapGesture {
-            withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 1.0)) {
                 onResume()
             }
         }

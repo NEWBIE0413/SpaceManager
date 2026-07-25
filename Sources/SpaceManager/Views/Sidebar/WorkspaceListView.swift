@@ -31,8 +31,8 @@ struct WorkspaceListView: View {
                     appState.showNewWorkspaceSheet = true
                 } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(isHoveringHeader ? .primary : .secondary)
+                        .font(.system(size: Sidebar.iconSize, weight: .medium))
+                        .foregroundColor(isHoveringHeader ? .primary : .secondary.opacity(0.9))
                 }
                 .buttonStyle(.plain)
                 .frame(width: 20)
@@ -42,8 +42,8 @@ struct WorkspaceListView: View {
 
             if appState.workspaces.isEmpty {
                 Text("No workspaces")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary.opacity(0.9))
                     .padding(.horizontal, 16)
                     .padding(.vertical, 4)
             } else {
@@ -58,7 +58,7 @@ struct WorkspaceListView: View {
                         onAddTmuxTab: { appState.selectWorkspace(workspace); appState.addTmuxTab() }
                     )
                     .onTapGesture {
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 1.0)) {
                             appState.selectWorkspace(workspace)
                         }
                     }
@@ -124,7 +124,7 @@ struct WorkspaceListView: View {
                                 isSelected: appState.selectedSession?.id == session.id,
                                 animation: animation,
                                 onSelect: { 
-                                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 1.0)) {
                                         appState.selectSession(session)
                                     }
                                 },
@@ -221,8 +221,8 @@ struct WorkspaceTabRow: View {
                 .frame(width: 5, height: 5)
 
             Text(session.name)
-                .font(.system(size: 12, weight: isSelected ? .medium : .regular))
-                .foregroundColor(isSelected ? .warmPink : .primary.opacity(0.7))
+                .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                .foregroundColor(isSelected ? .primary : .primary.opacity(0.85))
                 .lineLimit(1)
 
             Spacer(minLength: 0)
@@ -232,7 +232,7 @@ struct WorkspaceTabRow: View {
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.secondary.opacity(0.9))
                     .frame(width: 14, height: 14)
                     .contentShape(Rectangle())
             }
@@ -247,12 +247,11 @@ struct WorkspaceTabRow: View {
         .background {
             if isSelected {
                 RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius)
-                    .fill(Color.white.opacity(0.12))
-                    .shadow(color: Color.black.opacity(0.2), radius: 4, y: 2)
+                    .fill(Color.white.opacity(0.10))
                     .matchedGeometryEffect(id: "selection_bg", in: animation)
             } else if isHovering {
                 RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius)
-                    .fill(Color.primary.opacity(0.04))
+                    .fill(Color.white.opacity(0.04))
             }
         }
         .contentShape(Rectangle())
@@ -301,22 +300,22 @@ struct WorkspaceRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: isSelected ? "folder.fill" : "folder")
-                .font(.system(size: Sidebar.iconSize))
-                .foregroundColor(isSelected ? .warmPink.opacity(0.8) : .secondary)
+                .font(.system(size: Sidebar.iconSize, weight: .medium))
+                .foregroundColor(isSelected ? .primary : .secondary.opacity(0.9))
                 .frame(width: Sidebar.iconFrame)
 
             // 경로 부제는 선택된 행에만 — 호버로 행 높이가 변하면 목록 전체가 출렁인다.
             // 다른 행의 경로는 툴팁(.help)으로 확인.
             VStack(alignment: .leading, spacing: 2) {
                 Text(workspace.name)
-                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                    .foregroundColor(isSelected ? .warmPink : .primary.opacity(0.9))
+                    .font(.system(size: 13, weight: isSelected ? .bold : .medium))
+                    .foregroundColor(isSelected ? .primary : .primary.opacity(0.9))
                     .lineLimit(1)
 
                 if isSelected {
                     Text(workspace.rootPath.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.secondary.opacity(0.9))
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -334,8 +333,8 @@ struct WorkspaceRow: View {
                 }
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary.opacity(0.9))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -349,12 +348,11 @@ struct WorkspaceRow: View {
         .background {
             if isSelected {
                 RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius)
-                    .fill(Color.white.opacity(0.12))
-                    .shadow(color: Color.black.opacity(0.2), radius: 4, y: 2)
+                    .fill(Color.white.opacity(0.10))
                     .matchedGeometryEffect(id: "selection_bg", in: animation)
             } else if isHovering {
                 RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius)
-                    .fill(Color.primary.opacity(0.04))
+                    .fill(Color.white.opacity(0.04))
             }
         }
         .contentShape(Rectangle())
