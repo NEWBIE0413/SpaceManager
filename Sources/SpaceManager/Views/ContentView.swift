@@ -61,6 +61,12 @@ struct ContentView: View {
                 
                 TerminalAreaView()
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        if windowKind == .workspace {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color.white.opacity(0.07), lineWidth: 1)
+                        }
+                    }
                     .shadow(color: Color.black.opacity(isDarkNow ? 0.3 : 0.1), radius: 8, x: 0, y: 4)
             }
             // 캔버스 인셋: 신호등(Traffic Lights) 겹침 방지 및 테두리 여백

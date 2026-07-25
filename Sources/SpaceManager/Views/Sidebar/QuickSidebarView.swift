@@ -8,17 +8,6 @@ struct QuickSidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            QuickSectionHeader(title: "새로 생성") {
-                Button {
-                    appState.showQuickHome()
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .bold))
-                }
-                .buttonStyle(.plain)
-                .help("새 Claude 대화")
-            }
-
             Button {
                 appState.showQuickHome()
             } label: {
@@ -42,40 +31,33 @@ struct QuickSidebarView: View {
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 8)
+            .padding(.top, 16)
             .onHover { isHoveringNew = $0 }
 
-            QuickSectionHeader(title: "열린 대화") {
-                EmptyView()
-            }
-
-            Group {
-                if appState.sessions.isEmpty {
-                    Text("열린 대화가 없습니다")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 3) {
-                            ForEach(appState.sessions) { session in
-                                QuickSessionRow(
-                                    session: session,
-                                    isSelected: appState.selectedSession?.id == session.id,
-                                    onSelect: {
-                                        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-                                            appState.selectSession(session)
-                                        }
-                                    },
-                                    onClose: { appState.removeQuickSession(session) }
-                                )
-                            }
-                        }
-                        .padding(.horizontal, 8)
-                    }
+            if !appState.sessions.isEmpty {
+                QuickSectionHeader(title: "열린 대화") {
+                    EmptyView()
                 }
+
+                ScrollView {
+                    LazyVStack(spacing: 3) {
+                        ForEach(appState.sessions) { session in
+                            QuickSessionRow(
+                                session: session,
+                                isSelected: appState.selectedSession?.id == session.id,
+                                onSelect: {
+                                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                                        appState.selectSession(session)
+                                    }
+                                },
+                                onClose: { appState.removeQuickSession(session) }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                }
+                .frame(maxHeight: 220)
             }
-            .frame(maxHeight: 220)
 
             QuickSectionHeader(title: "최근 항목") {
                 Button {
@@ -88,29 +70,31 @@ struct QuickSidebarView: View {
                 .help("최근 대화 새로고침")
             }
 
-            if recentScanner.conversations.isEmpty {
-                Text("최근 대화가 없습니다")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 3) {
-                        ForEach(recentScanner.conversations) { conversation in
-                            QuickRecentConversationRow(
-                                conversation: conversation,
-                                onResume: {
-                                    appState.resumeQuickConversation(sessionId: conversation.id)
-                                }
-                            )
+            Group {
+                if recentScanner.conversations.isEmpty {
+                    Text("최근 대화가 없습니다")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 3) {
+                            ForEach(recentScanner.conversations) { conversation in
+                                QuickRecentConversationRow(
+                                    conversation: conversation,
+                                    onResume: {
+                                        appState.resumeQuickConversation(sessionId: conversation.id)
+                                    }
+                                )
+                            }
                         }
+                        .padding(.horizontal, 8)
                     }
-                    .padding(.horizontal, 8)
                 }
             }
-
-            Spacer()
+            .frame(maxHeight: .infinity, alignment: .top)
         }
         .frame(maxHeight: .infinity)
         .background(Color(nsColor: .controlBackgroundColor))

@@ -65,6 +65,7 @@ struct QuickHomeView: View {
                         .foregroundColor(Color(red: 0.92, green: 0.45, blue: 0.35))
                     Text("새 대화 시작")
                         .font(.system(size: 30, weight: .semibold))
+                        .tracking(-0.5)
                         .foregroundColor(.primary)
                 }
                 Text("무엇을 도와드릴까요?")
@@ -99,10 +100,10 @@ struct QuickHomeView: View {
                     Button(action: submit) {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(trimmedPrompt.isEmpty ? Color.secondary.opacity(0.4) : Color.white)
+                            .foregroundColor(trimmedPrompt.isEmpty ? Color.secondary.opacity(0.55) : Color.white)
                             .frame(width: 32, height: 32)
                             .background(
-                                Circle().fill(trimmedPrompt.isEmpty ? Color.primary.opacity(0.08) : Color.black)
+                                Circle().fill(trimmedPrompt.isEmpty ? Color.primary.opacity(0.12) : Color.black)
                             )
                             .animation(.spring(response: 0.25, dampingFraction: 0.82), value: trimmedPrompt.isEmpty)
                     }
@@ -119,7 +120,7 @@ struct QuickHomeView: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                    .stroke(Color.black.opacity(0.10), lineWidth: 1)
             )
         }
         .frame(maxWidth: 640)
