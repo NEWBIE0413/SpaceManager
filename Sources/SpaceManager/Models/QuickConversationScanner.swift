@@ -3,6 +3,7 @@ import Foundation
 struct QuickConversation: Identifiable, Equatable {
     let id: String          // transcript 파일명의 UUID = ccv -ry 인자
     let title: String
+    let aiTitle: String?
     let modifiedAt: Date
     let transcriptURL: URL
 }
@@ -14,10 +15,16 @@ final class QuickConversationScanner: ObservableObject {
     static let refreshInterval: TimeInterval = 5
 
     @Published private(set) var conversations: [QuickConversation] = []
+    @Published private(set) var aiTitlesBySessionId: [String: String] = [:]
 
     private struct CacheEntry {
         let modifiedAt: Date
         let conversation: QuickConversation?
+    }
+
+    private struct ScanResult {
+        let conversations: [QuickConversation]
+        let aiTitlesBySessionId: [String: String]
     }
 
     private let transcriptsDirectory: URL
@@ -55,10 +62,13 @@ final class QuickConversationScanner: ObservableObject {
         let directory = transcriptsDirectory
         queue.async { [weak self] in
             guard let self else { return }
-            let scanned = Self.scan(directory: directory, cache: &self.cache)
+            let scanned = Self.scanResult(directory: directory, cache: &self.cache)
             DispatchQueue.main.async {
-                if self.conversations != scanned {
-                    self.conversations = scanned
+                if self.conversations != scanned.conversations {
+                    self.conversations = scanned.conversations
+                }
+                if self.aiTitlesBySessionId != scanned.aiTitlesBySessionId {
+                    self.aiTitlesBySessionId = scanned.aiTitlesBySessionId
                 }
             }
         }
@@ -66,13 +76,18 @@ final class QuickConversationScanner: ObservableObject {
 
     static func scan(directory: URL) -> [QuickConversation] {
         var cache: [String: CacheEntry] = [:]
-        return scan(directory: directory, cache: &cache)
+        return scanResult(directory: directory, cache: &cache).conversations
     }
 
-    private static func scan(
+    static func scanAITitles(directory: URL) -> [String: String] {
+        var cache: [String: CacheEntry] = [:]
+        return scanResult(directory: directory, cache: &cache).aiTitlesBySessionId
+    }
+
+    private static func scanResult(
         directory: URL,
         cache: inout [String: CacheEntry]
-    ) -> [QuickConversation] {
+    ) -> ScanResult {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(
             at: directory,
@@ -80,7 +95,7 @@ final class QuickConversationScanner: ObservableObject {
             options: [.skipsHiddenFiles]
         ) else {
             cache.removeAll()
-            return []
+            return ScanResult(conversations: [], aiTitlesBySessionId: [:])
         }
 
         var found: [QuickConversation] = []
@@ -103,6 +118,9 @@ final class QuickConversationScanner: ObservableObject {
             if let parsed { found.append(parsed) }
         }
         cache = cache.filter { livePaths.contains($0.key) }
+        let aiTitles = Dictionary(uniqueKeysWithValues: found.compactMap { conversation in
+            conversation.aiTitle.map { (conversation.id, $0) }
+        })
 
         // Claude resume가 새 sessionId 파일을 만들면 ai-title이 같은 transcript가
         // 복수 생길 수 있다. 같은 표시 제목은 최신 파일을 resume 대상으로 삼는다.
@@ -114,7 +132,10 @@ final class QuickConversationScanner: ObservableObject {
             }
             newestByTitle[key] = conversation
         }
-        return newestByTitle.values.sorted { $0.modifiedAt > $1.modifiedAt }
+        return ScanResult(
+            conversations: newestByTitle.values.sorted { $0.modifiedAt > $1.modifiedAt },
+            aiTitlesBySessionId: aiTitles
+        )
     }
 
     private static func parseTranscript(
@@ -144,6 +165,7 @@ final class QuickConversationScanner: ObservableObject {
         return QuickConversation(
             id: sessionId,
             title: title,
+            aiTitle: lastAITitle,
             modifiedAt: modifiedAt,
             transcriptURL: url
         )

@@ -11,6 +11,7 @@ final class PTYProcess {
     var onOutput: ((Data) -> Void)?
     var onExit: ((Int32) -> Void)?
     private(set) var isRunning = false
+    var processIdentifier: pid_t? { pid > 0 ? pid : nil }
 
     private var masterFD: Int32 = -1
     private var pid: pid_t = -1

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 
 enum TabKind: String, Codable {
     case tmuxMain    // 워크스페이스 고정 탭 — 워크스페이스 tmux 세션에 attach
@@ -20,10 +21,14 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     /// tmuxMain/tmuxExtra가 attach할 세션명 (shell이면 nil)
     let tmuxSessionName: String?
     let quickLaunch: QuickLaunch?
+    private let initialName: String
 
     private(set) var terminalView: TerminalWebView?
     private var pty: PTYProcess?
     private var started = false
+    private var quickSessionId: String?
+    private var quickIdentityTimer: Timer?
+    private var quickTitleCancellable: AnyCancellable?
 
     init(id: UUID = UUID(), kind: TabKind, name: String,
          workingDirectory: String, tmuxSessionName: String? = nil,
@@ -31,9 +36,11 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
         self.id = id
         self.kind = kind
         self.name = name
+        self.initialName = name
         self.workingDirectory = workingDirectory
         self.tmuxSessionName = tmuxSessionName
         self.quickLaunch = quickLaunch
+        self.quickSessionId = quickLaunch?.resumeSessionId
     }
 
     func getOrCreateTerminal() -> TerminalWebView {
@@ -104,10 +111,66 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
             self.pty = pty
             isRunning = true
             startError = nil
+            if kind == .quick, let processIdentifier = pty.processIdentifier {
+                beginQuickTitleUpdates(processIdentifier: processIdentifier)
+            }
         } catch {
             startError = "터미널 시작 실패: \(error)"
             isRunning = false
         }
+    }
+
+    private func beginQuickTitleUpdates(processIdentifier: pid_t) {
+        let scanner = QuickConversationScanner.shared
+        if quickLaunch?.resumeSessionId == nil {
+            quickSessionId = nil
+            name = initialName
+        }
+        quickTitleCancellable = scanner.$aiTitlesBySessionId
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] titles in
+                self?.updateQuickTitle(titlesBySessionId: titles)
+            }
+        scanner.start()
+        scanner.rescan()
+
+        guard quickSessionId == nil else { return }
+        resolveQuickSessionId(processIdentifier: processIdentifier)
+        guard quickSessionId == nil else { return }
+        quickIdentityTimer?.invalidate()
+        quickIdentityTimer = Timer.scheduledTimer(
+            withTimeInterval: 1,
+            repeats: true
+        ) { [weak self] timer in
+            guard let self, self.isRunning else {
+                timer.invalidate()
+                return
+            }
+            self.resolveQuickSessionId(processIdentifier: processIdentifier)
+            if self.quickSessionId != nil {
+                timer.invalidate()
+                self.quickIdentityTimer = nil
+            }
+        }
+    }
+
+    private func resolveQuickSessionId(processIdentifier: pid_t) {
+        guard quickSessionId == nil,
+              let sessionId = QuickSessionTitleResolver.sessionId(
+                processIdentifier: processIdentifier
+              ) else { return }
+        quickSessionId = sessionId
+        updateQuickTitle(
+            titlesBySessionId: QuickConversationScanner.shared.aiTitlesBySessionId
+        )
+        QuickConversationScanner.shared.rescan()
+    }
+
+    func updateQuickTitle(titlesBySessionId: [String: String]) {
+        guard kind == .quick,
+              let quickSessionId,
+              let title = titlesBySessionId[quickSessionId] else { return }
+        name = title
     }
 
     /// 죽은 탭 재시작 (프로세스 종료·시작 실패 후 재시도)
@@ -135,6 +198,9 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     }
 
     func cleanup(force: Bool = false) {
+        quickIdentityTimer?.invalidate()
+        quickIdentityTimer = nil
+        quickTitleCancellable = nil
         pty?.terminate(force: force)
         pty = nil
         terminalView?.removeFromSuperview()
@@ -163,6 +229,13 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
             )]
         }
         return []   // 순수 인터랙티브 로그인 셸
+    }
+}
+
+private extension QuickLaunch {
+    var resumeSessionId: String? {
+        guard case .resume(let sessionId) = self else { return nil }
+        return sessionId
     }
 }
 
