@@ -9,7 +9,7 @@ struct QuickSidebarView: View {
         VStack(alignment: .leading, spacing: 0) {
             SidebarSectionHeader(title: "새로 생성") {
                 Button {
-                    appState.addQuickSession()
+                    appState.showQuickHome()
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 12, weight: .bold))
@@ -19,7 +19,7 @@ struct QuickSidebarView: View {
             }
 
             Button {
-                appState.addQuickSession()
+                appState.showQuickHome()
             } label: {
                 Label("새 대화", systemImage: "square.and.pencil")
                     .font(.system(size: 13, weight: .medium))

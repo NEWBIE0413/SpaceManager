@@ -74,4 +74,21 @@ final class QuickSessionTests: XCTestCase {
         XCTAssertNil(session.tmuxSessionName)
         session.cleanup() // 시작 전에도 즉시·무해하게 종료 가능
     }
+
+    func testSidebarNewConversationShowsComposerWithoutClosingOpenTabs() {
+        let state = AppState(windowKind: .quick)
+        let session = TerminalSession(
+            kind: .quick,
+            name: "q-1",
+            workingDirectory: QuickSessionPolicy.workingDirectory
+        )
+        state.sessions = [session]
+        state.selectedSession = session
+
+        state.showQuickHome()
+
+        XCTAssertNil(state.selectedSession)
+        XCTAssertEqual(state.sessions.map(\.id), [session.id])
+        session.cleanup()
+    }
 }

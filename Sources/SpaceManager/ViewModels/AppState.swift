@@ -290,6 +290,13 @@ class AppState: ObservableObject {
         addQuickSession(resumeSessionId: sessionId)
     }
 
+    /// 사이드바의 "새 대화"는 프로세스를 미리 띄우지 않고 Hermes 홈으로 돌아간다.
+    /// 기존 Quick 탭은 열린 채 유지하며, Cmd+T만 즉시 blank 세션을 시작한다.
+    func showQuickHome() {
+        guard windowKind == .quick else { return }
+        selectedSession = nil
+    }
+
     /// 추가 tmux 탭 — <세션명>-2, -3, … 자동 넘버링
     func addTmuxTab() {
         guard let workspace = selectedWorkspace else { return }
