@@ -113,8 +113,8 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
         }
     }
 
-    func cleanup() {
-        pty?.terminate()
+    func cleanup(force: Bool = false) {
+        pty?.terminate(force: force)
         pty = nil
         terminalView?.removeFromSuperview()
         terminalView = nil

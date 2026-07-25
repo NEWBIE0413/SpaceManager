@@ -334,7 +334,7 @@ class AppState: ObservableObject {
     /// 확인 대화상자도 없다.
     func removeQuickSession(_ session: TerminalSession) {
         guard windowKind == .quick, session.kind == .quick else { return }
-        session.cleanup()
+        session.cleanup(force: true)
         sessions.removeAll { $0.id == session.id }
         if selectedSession?.id == session.id {
             selectedSession = sessions.first

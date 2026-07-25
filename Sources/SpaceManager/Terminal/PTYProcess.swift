@@ -207,9 +207,11 @@ final class PTYProcess {
         }
     }
 
-    func terminate() {
+    func terminate(force: Bool = false) {
         guard pid > 0, isRunning else { return }
-        kill(pid, SIGHUP)
+        // tmux attach 클라이언트는 SIGHUP으로 자연스럽게 detach한다. Quick의
+        // 직접 실행 Claude는 SIGHUP을 처리해 생존할 수 있어 SIGTERM이 필요하다.
+        kill(pid, force ? SIGTERM : SIGHUP)
     }
 
     deinit {

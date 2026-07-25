@@ -54,6 +54,21 @@ final class PTYProcessTests: XCTestCase {
         pty.terminate()
     }
 
+    func testForceTerminateEndsDirectChild() throws {
+        let pty = PTYProcess()
+        let exited = expectation(description: "direct child exits on SIGTERM")
+        pty.onExit = { _ in exited.fulfill() }
+        try pty.start(
+            executable: "/bin/cat", execName: "cat", arguments: [],
+            environment: ["TERM": "xterm-256color"],
+            workingDirectory: NSHomeDirectory(), cols: 80, rows: 24
+        )
+
+        pty.terminate(force: true)
+        wait(for: [exited], timeout: 10)
+        XCTAssertFalse(pty.isRunning)
+    }
+
     /// 큰 페이로드를 단일 write() 호출로 보내 pending-write/EAGAIN 경로에서
     /// tail이 잘리지 않는지 검증한다. EAGAIN이 실제로 발생하는지는 tty 입력 버퍼
     /// 크기에 달려 있어 보장할 수 없지만, 만약 구현이 다시 "n <= 0이면 그냥 중단"
