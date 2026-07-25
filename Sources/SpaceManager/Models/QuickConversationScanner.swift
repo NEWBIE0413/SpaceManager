@@ -25,7 +25,7 @@ final class QuickConversationScanner: ObservableObject {
     private var cache: [String: CacheEntry] = [:]
     private var timer: Timer?
 
-    init(transcriptsDirectory: URL = Self.defaultTranscriptsDirectory()) {
+    init(transcriptsDirectory: URL = QuickConversationScanner.defaultTranscriptsDirectory()) {
         self.transcriptsDirectory = transcriptsDirectory
     }
 
