@@ -222,7 +222,7 @@ struct WorkspaceTabRow: View {
 
             Text(session.name)
                 .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
-                .foregroundColor(isSelected ? .primary : .primary.opacity(0.85))
+                .foregroundColor(isSelected ? .warmPinkMuted : .primary.opacity(0.85))
                 .lineLimit(1)
 
             Spacer(minLength: 0)
@@ -301,7 +301,7 @@ struct WorkspaceRow: View {
         HStack(spacing: 8) {
             Image(systemName: isSelected ? "folder.fill" : "folder")
                 .font(.system(size: Sidebar.iconSize, weight: .medium))
-                .foregroundColor(isSelected ? .primary : .secondary.opacity(0.9))
+                .foregroundColor(isSelected ? .warmPinkMuted : .secondary.opacity(0.9))
                 .frame(width: Sidebar.iconFrame)
 
             // 경로 부제는 선택된 행에만 — 호버로 행 높이가 변하면 목록 전체가 출렁인다.
@@ -309,7 +309,7 @@ struct WorkspaceRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(workspace.name)
                     .font(.system(size: 13, weight: isSelected ? .bold : .medium))
-                    .foregroundColor(isSelected ? .primary : .primary.opacity(0.9))
+                    .foregroundColor(isSelected ? .warmPinkMuted : .primary.opacity(0.9))
                     .lineLimit(1)
 
                 if isSelected {
