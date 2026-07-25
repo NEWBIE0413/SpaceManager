@@ -53,6 +53,15 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
         startPTY()
     }
 
+    /// Quick은 클릭 순간 WebView 로드와 Claude 기동을 함께 시작한다. xterm이 아직
+    /// ready가 아니어도 TerminalWebView.feed가 pendingOutput에 보관하고 ready 때
+    /// flush하므로 초기 출력 유실 없이 두 비싼 준비 단계를 겹칠 수 있다.
+    func startQuickImmediately() {
+        guard kind == .quick else { return }
+        _ = getOrCreateTerminal()
+        startIfNeeded()
+    }
+
     private func startPTY() {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let execName = "-" + (shell as NSString).lastPathComponent

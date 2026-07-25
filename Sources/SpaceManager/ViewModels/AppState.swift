@@ -270,6 +270,7 @@ class AppState: ObservableObject {
         )
         sessions.append(session)
         selectSession(session)
+        session.startQuickImmediately()
     }
 
     /// 추가 tmux 탭 — <세션명>-2, -3, … 자동 넘버링
@@ -339,8 +340,6 @@ class AppState: ObservableObject {
         if selectedSession?.id == session.id {
             selectedSession = sessions.first
         }
-        // WindowState에는 Quick 탭을 기록하지 않지만 창 종류 저장을 최신화한다.
-        persistWindowState()
     }
 
     func selectSession(_ session: TerminalSession) {
@@ -354,7 +353,11 @@ class AppState: ObservableObject {
         }
         session.restartIfDead()
         session.focusTerminal()
-        persistWindowState()
+        // Quick 탭/선택은 의도적으로 복원하지 않으므로 클릭 경로에서
+        // window-states.json 원자 쓰기를 하지 않는다.
+        if windowKind == .workspace {
+            persistWindowState()
+        }
     }
 
     func selectNextSession() {
