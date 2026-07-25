@@ -46,15 +46,11 @@ final class StorageRoundtripTests: XCTestCase {
     }
 
     func testQuickWindowStateRoundtrip() throws {
-        let quick = TabSnapshot(id: UUID(), kind: .tmuxExtra, name: "q-1",
-                                workingDirectory: NSHomeDirectory(), tmuxSessionName: "q-1")
         let state = WindowState(
             id: UUID(),
             kind: .quick,
             selectedWorkspaceId: nil,
             workspaceTabs: [],
-            selectedQuickTabId: quick.id,
-            quickTabs: [quick],
             appearance: "light"
         )
 
@@ -63,7 +59,6 @@ final class StorageRoundtripTests: XCTestCase {
             from: JSONEncoder().encode(state)
         )
         XCTAssertEqual(decoded.resolvedKind, .quick)
-        XCTAssertEqual(decoded.selectedQuickTabId, quick.id)
-        XCTAssertEqual(decoded.quickTabs?.map(\.name), ["q-1"])
+        XCTAssertEqual(decoded.appearance, "light")
     }
 }

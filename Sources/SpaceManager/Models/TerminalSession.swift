@@ -5,6 +5,7 @@ enum TabKind: String, Codable {
     case tmuxMain    // 워크스페이스 고정 탭 — 워크스페이스 tmux 세션에 attach
     case shell       // 순수 셸 탭 — 앱 재시작 시 새 셸로 시작 (복구 없음, 명시적 한계)
     case tmuxExtra   // 추가 tmux 탭 — <세션명>-N, 재부팅 후에도 복구됨
+    case quick       // 홈에서 로그인 셸로 ccv를 직접 실행하는 일회성 대화 PTY
 }
 
 /// 터미널 탭 하나. PTYProcess + TerminalWebView 쌍을 소유해
@@ -60,12 +61,11 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
 
         let startDir = FileManager.default.fileExists(atPath: workingDirectory)
             ? workingDirectory : NSHomeDirectory()
-        let arguments: [String]
-        if let sessionName = tmuxSessionName {
-            arguments = ["-lc", TmuxBootstrap.startupScript(sessionName: sessionName, workingDirectory: startDir)]
-        } else {
-            arguments = []   // 순수 인터랙티브 로그인 셸
-        }
+        let arguments = Self.launchArguments(
+            kind: kind,
+            tmuxSessionName: tmuxSessionName,
+            workingDirectory: startDir
+        )
 
         let pty = PTYProcess()
         let view = terminalView
@@ -121,6 +121,25 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
 
     static func == (lhs: TerminalSession, rhs: TerminalSession) -> Bool {
         lhs.id == rhs.id
+    }
+
+    /// PTY 실행 정책을 순수 함수로 분리해 Quick이 TmuxBootstrap을 절대 거치지
+    /// 않는다는 경계를 테스트할 수 있게 한다.
+    static func launchArguments(
+        kind: TabKind,
+        tmuxSessionName: String?,
+        workingDirectory: String
+    ) -> [String] {
+        if kind == .quick {
+            return ["-lc", QuickSessionPolicy.launchCommand]
+        }
+        if let tmuxSessionName {
+            return ["-lc", TmuxBootstrap.startupScript(
+                sessionName: tmuxSessionName,
+                workingDirectory: workingDirectory
+            )]
+        }
+        return []   // 순수 인터랙티브 로그인 셸
     }
 }
 

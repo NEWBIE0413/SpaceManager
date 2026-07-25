@@ -83,10 +83,10 @@ struct AppCommands: Commands {
                 appState?.showNewWorkspaceSheet = true
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
-            .disabled(appState == nil)
+            .disabled(appState == nil || appState?.windowKind == .quick)
 
-            Button("New Terminal Tab") {
-                appState?.addShellTab()
+            Button(appState?.windowKind == .quick ? "New Quick Conversation" : "New Terminal Tab") {
+                appState?.addDefaultTab()
             }
             .keyboardShortcut("t", modifiers: .command)
             .disabled(appState == nil)
@@ -95,7 +95,7 @@ struct AppCommands: Commands {
                 appState?.addTmuxTab()
             }
             .keyboardShortcut("t", modifiers: [.command, .shift])
-            .disabled(appState == nil || !TmuxBootstrap.isTmuxAvailable)
+            .disabled(appState == nil || appState?.windowKind == .quick || !TmuxBootstrap.isTmuxAvailable)
         }
 
         CommandMenu("Tabs") {

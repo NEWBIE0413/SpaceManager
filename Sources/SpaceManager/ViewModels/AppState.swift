@@ -72,8 +72,10 @@ class AppState: ObservableObject {
 
     private func restore(from state: WindowState) {
         if windowKind == .quick {
-            sessions = (state.quickTabs ?? []).map { TerminalSession(snapshot: $0) }
-            selectedSession = sessions.first(where: { $0.id == state.selectedQuickTabId }) ?? sessions.first
+            // Quick 탭은 브라우저 탭처럼 프로세스 수명만 가진다. 창 종류만 복원하고
+            // 이전 대화 PTY는 되살리지 않는다 (대화 자체는 ccv transcript에 남는다).
+            sessions = []
+            selectedSession = nil
             preferredAppearance = "light"
             return
         }
@@ -115,8 +117,6 @@ class AppState: ObservableObject {
             selectedWorkspaceId: selectedWorkspace?.id,
             workspaces: workspaces,
             workspaceTabs: wsStates,
-            selectedQuickTabId: windowKind == .quick ? selectedSession?.id : nil,
-            quickTabs: windowKind == .quick ? sessions.map { $0.snapshot() } : nil,
             appearance: preferredAppearance
         ))
     }
@@ -251,6 +251,27 @@ class AppState: ObservableObject {
         appendAndSelect(session, in: workspace)
     }
 
+    func addDefaultTab() {
+        if windowKind == .quick {
+            addQuickSession()
+        } else {
+            addShellTab()
+        }
+    }
+
+    /// 폴더나 이름 입력 없이 홈에서 Claude 대화를 즉시 시작한다.
+    func addQuickSession() {
+        guard windowKind == .quick else { return }
+        let name = QuickSessionPolicy.nextName(usedNames: Set(sessions.map(\.name)))
+        let session = TerminalSession(
+            kind: .quick,
+            name: name,
+            workingDirectory: NSHomeDirectory()
+        )
+        sessions.append(session)
+        selectSession(session)
+    }
+
     /// 추가 tmux 탭 — <세션명>-2, -3, … 자동 넘버링
     func addTmuxTab() {
         guard let workspace = selectedWorkspace else { return }
@@ -290,6 +311,10 @@ class AppState: ObservableObject {
     }
 
     func removeSession(_ session: TerminalSession) {
+        if windowKind == .quick {
+            removeQuickSession(session)
+            return
+        }
         // 메인 탭은 닫기 대상이 아니다 — ensureSessions가 다음 방문에 어차피 재생성하므로
         // 여기서 지우면 "지워졌다가 되살아나는" 유령 삭제가 된다. UI(WorkspaceTabRow)도
         // 메인 탭엔 ×를 숨기지만, 진입점이 늘어도 안전하도록 모델에서도 막는다.
@@ -302,6 +327,19 @@ class AppState: ObservableObject {
         if selectedSession?.id == session.id {
             selectedSession = sessions.first
         }
+        persistWindowState()
+    }
+
+    /// Quick의 ×는 PTY만 즉시 종료한다. tmux 세션이 없으므로 detach/kill 구분도,
+    /// 확인 대화상자도 없다.
+    func removeQuickSession(_ session: TerminalSession) {
+        guard windowKind == .quick, session.kind == .quick else { return }
+        session.cleanup()
+        sessions.removeAll { $0.id == session.id }
+        if selectedSession?.id == session.id {
+            selectedSession = sessions.first
+        }
+        // WindowState에는 Quick 탭을 기록하지 않지만 창 종류 저장을 최신화한다.
         persistWindowState()
     }
 

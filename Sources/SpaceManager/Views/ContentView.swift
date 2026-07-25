@@ -44,9 +44,7 @@ struct ContentView: View {
             HStack(spacing: 12) {
                 Group {
                     if windowKind == .quick {
-                        // 전용 목록은 다음 구현 단위에서 붙인다. 창 종류 저장/복원
-                        // 경계부터 독립시켜 일반 창 상태를 잘못 claim하지 않게 한다.
-                        SidebarView()
+                        QuickSidebarView()
                     } else {
                         SidebarView()
                     }

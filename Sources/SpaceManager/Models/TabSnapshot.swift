@@ -37,8 +37,6 @@ struct WindowState: Codable, Identifiable {
     var selectedWorkspaceId: UUID?
     var workspaces: [Workspace]? = nil   // nil이면 레거시(전역 목록) 상태 — 복원 시 1회 이관
     var workspaceTabs: [WorkspaceTabsState]
-    var selectedQuickTabId: UUID? = nil
-    var quickTabs: [TabSnapshot]? = nil
     /// 창별 라이트/다크 선택 ("light"/"dark"/"system"). nil이면 레거시 — 전역 기본값 사용
     var appearance: String? = nil
 
