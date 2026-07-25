@@ -12,6 +12,7 @@ class WorkspaceStorage: ObservableObject {
     @Published var workspaces: [Workspace] = []
     @Published var windowStates: [WindowState] = []
     private var claimedWindowStateIds: Set<UUID> = []
+    private var claimedWindowKinds: [UUID: WindowKind] = [:]
 
     /// Base directory for storage
     private var storageDirectory: URL {
@@ -102,19 +103,31 @@ class WorkspaceStorage: ObservableObject {
     }
 
     /// 아직 어떤 창도 가져가지 않은 저장 상태를 하나 claim (인메모리 — 파일은 불변)
-    func claimNextWindowState() -> WindowState? {
-        guard let state = windowStates.first(where: { !claimedWindowStateIds.contains($0.id) }) else {
+    func claimNextWindowState(kind: WindowKind) -> WindowState? {
+        guard let state = windowStates.first(where: {
+            $0.resolvedKind == kind && !claimedWindowStateIds.contains($0.id)
+        }) else {
             return nil
         }
         claimedWindowStateIds.insert(state.id)
+        claimedWindowKinds[state.id] = kind
         return state
     }
 
-    func registerClaimed(_ id: UUID) {
+    func registerClaimed(_ id: UUID, kind: WindowKind) {
         claimedWindowStateIds.insert(id)
+        claimedWindowKinds[id] = kind
     }
 
     var claimedCount: Int { claimedWindowStateIds.count }
+
+    func claimedCount(for kind: WindowKind) -> Int {
+        claimedWindowKinds.values.filter { $0 == kind }.count
+    }
+
+    func savedCount(for kind: WindowKind) -> Int {
+        windowStates.filter { $0.resolvedKind == kind }.count
+    }
 
     func updateWindowState(_ state: WindowState) {
         if let index = windowStates.firstIndex(where: { $0.id == state.id }) {
@@ -127,6 +140,7 @@ class WorkspaceStorage: ObservableObject {
 
     func removeWindowState(id: UUID) {
         claimedWindowStateIds.remove(id)
+        claimedWindowKinds[id] = nil
         windowStates.removeAll { $0.id == id }
         saveWindowStates()
     }

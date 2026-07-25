@@ -4,10 +4,16 @@ import AppKit
 /// Main content view with two-pane layout.
 /// 창마다 하나씩 생성된다 — AppState가 여기 살아야 창별 독립 선택이 가능하다.
 struct ContentView: View {
-    @StateObject private var appState = AppState()
+    private let windowKind: WindowKind
+    @StateObject private var appState: AppState
     @ObservedObject private var activityScanner = RecentActivityScanner.shared
     @StateObject private var islandHover = IslandHoverState()
     @Environment(\.openWindow) private var openWindow
+
+    init(windowKind: WindowKind = .workspace) {
+        self.windowKind = windowKind
+        _appState = StateObject(wrappedValue: AppState(windowKind: windowKind))
+    }
 
     private var isDarkNow: Bool {
         switch appState.preferredAppearance {
@@ -21,6 +27,7 @@ struct ContentView: View {
     /// 창별 라이트/다크 — preferredColorScheme은 이 창(씬) 전체에 적용된다
     /// (타이틀바 텍스트·툴바·시트 포함). nil이면 시스템 추종.
     private var preferredScheme: ColorScheme? {
+        if windowKind == .quick { return .light }
         switch appState.preferredAppearance {
         case "light": return .light
         case "dark": return .dark
@@ -35,7 +42,15 @@ struct ContentView: View {
                 .ignoresSafeArea()
             
             HStack(spacing: 12) {
-                SidebarView()
+                Group {
+                    if windowKind == .quick {
+                        // 전용 목록은 다음 구현 단위에서 붙인다. 창 종류 저장/복원
+                        // 경계부터 독립시켜 일반 창 상태를 잘못 claim하지 않게 한다.
+                        SidebarView()
+                    } else {
+                        SidebarView()
+                    }
+                }
                     .frame(width: 240)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 
@@ -49,13 +64,15 @@ struct ContentView: View {
             .padding(.top, 36)
             
             // 확장 패널 (아일랜드) - 상단 중앙에 직접 배치
-            VStack(spacing: 8) {
-                IslandPillView(scanner: activityScanner, hover: islandHover)
-                    // full-size content의 실제 창 상단 기준. 30pt pill 중심이
-                    // 신호등 중심선과 맞고, 아래 패널은 pill 다음에 자연히 열린다.
-                    .padding(.top, 6)
-                
-                IslandPanelView(scanner: activityScanner, hover: islandHover)
+            if windowKind == .workspace {
+                VStack(spacing: 8) {
+                    IslandPillView(scanner: activityScanner, hover: islandHover)
+                        // full-size content의 실제 창 상단 기준. 30pt pill 중심이
+                        // 신호등 중심선과 맞고, 아래 패널은 pill 다음에 자연히 열린다.
+                        .padding(.top, 6)
+
+                    IslandPanelView(scanner: activityScanner, hover: islandHover)
+                }
             }
         }
         // hiddenTitleBar도 SwiftUI 컨테이너에는 기존 타이틀바 safe area를 남긴다.
@@ -71,7 +88,7 @@ struct ContentView: View {
         .preferredColorScheme(preferredScheme)
         .onChange(of: appState.preferredAppearance) {
             // tmux 상태바는 전역 — 마지막으로 토글된 창의 무드를 따른다 (라이트→soft)
-            if appState.preferredAppearance == "light" {
+            if windowKind == .workspace && appState.preferredAppearance == "light" {
                 AppearanceManager.syncTmuxThemeToSoft()
             }
         }

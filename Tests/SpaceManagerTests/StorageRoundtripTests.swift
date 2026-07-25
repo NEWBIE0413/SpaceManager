@@ -10,6 +10,7 @@ final class StorageRoundtripTests: XCTestCase {
         let wsId = UUID()
         let state = WindowState(
             id: UUID(),
+            kind: .workspace,
             selectedWorkspaceId: wsId,
             workspaceTabs: [WorkspaceTabsState(workspaceId: wsId, selectedTabId: tab.id, tabs: [tab, shell])]
         )
@@ -17,6 +18,7 @@ final class StorageRoundtripTests: XCTestCase {
         let decoded = try JSONDecoder().decode([WindowState].self, from: data)
         XCTAssertEqual(decoded.count, 1)
         XCTAssertEqual(decoded[0].id, state.id)
+        XCTAssertEqual(decoded[0].resolvedKind, .workspace)
         XCTAssertEqual(decoded[0].workspaceTabs[0].tabs.map(\.kind), [.tmuxMain, .shell])
         XCTAssertEqual(decoded[0].workspaceTabs[0].selectedTabId, tab.id)
     }
@@ -40,5 +42,28 @@ final class StorageRoundtripTests: XCTestCase {
         """
         let state = try JSONDecoder().decode(WindowState.self, from: Data(legacy.utf8))
         XCTAssertNil(state.workspaces)   // 레거시 상태 → 전역 목록 폴백 트리거
+        XCTAssertEqual(state.resolvedKind, .workspace)
+    }
+
+    func testQuickWindowStateRoundtrip() throws {
+        let quick = TabSnapshot(id: UUID(), kind: .tmuxExtra, name: "q-1",
+                                workingDirectory: NSHomeDirectory(), tmuxSessionName: "q-1")
+        let state = WindowState(
+            id: UUID(),
+            kind: .quick,
+            selectedWorkspaceId: nil,
+            workspaceTabs: [],
+            selectedQuickTabId: quick.id,
+            quickTabs: [quick],
+            appearance: "light"
+        )
+
+        let decoded = try JSONDecoder().decode(
+            WindowState.self,
+            from: JSONEncoder().encode(state)
+        )
+        XCTAssertEqual(decoded.resolvedKind, .quick)
+        XCTAssertEqual(decoded.selectedQuickTabId, quick.id)
+        XCTAssertEqual(decoded.quickTabs?.map(\.name), ["q-1"])
     }
 }

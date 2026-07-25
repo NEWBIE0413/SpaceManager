@@ -51,6 +51,12 @@ struct SpaceManagerApp: App {
         .commands {
             AppCommands()
         }
+
+        WindowGroup(id: "quick") {
+            ContentView(windowKind: .quick)
+                .frame(minWidth: 760, minHeight: 520)
+        }
+        .windowStyle(.hiddenTitleBar)
     }
 }
 
@@ -65,6 +71,11 @@ struct AppCommands: Commands {
                 openWindow(id: "main")
             }
             .keyboardShortcut("n", modifiers: .command)
+
+            Button("New Quick Window") {
+                openWindow(id: "quick")
+            }
+            .keyboardShortcut("n", modifiers: [.command, .option])
 
             Divider()
 
@@ -115,10 +126,12 @@ enum WindowRestorer {
         // 시스템 상태 복원이 창을 이미 띄웠을 수 있으므로 잠시 뒤 부족분 계산
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             let storage = WorkspaceStorage.shared
-            let missing = storage.windowStates.count - storage.claimedCount
-            guard missing > 0 else { return }
-            for _ in 0..<missing {
-                openWindow(id: "main")
+            for kind in WindowKind.allCases {
+                let missing = storage.savedCount(for: kind) - storage.claimedCount(for: kind)
+                guard missing > 0 else { continue }
+                for _ in 0..<missing {
+                    openWindow(id: kind.sceneID)
+                }
             }
         }
     }

@@ -6,6 +6,7 @@ import Combine
 class AppState: ObservableObject {
     let storage = WorkspaceStorage.shared
 
+    let windowKind: WindowKind
     let windowStateId: UUID
 
     /// 이 창이 소유한 워크스페이스 목록 (창별 독립 — 전역 공유 아님)
@@ -26,19 +27,26 @@ class AppState: ObservableObject {
     @Published var preferredAppearance: String =
         UserDefaults.standard.string(forKey: "preferredAppearance") ?? "system"
 
-    init() {
+    init(windowKind: WindowKind = .workspace) {
+        self.windowKind = windowKind
         // windowStateId(let)를 모든 분기에서 먼저 확정해야 한다 — self.storage 접근(구독 설정)은
         // 저장 프로퍼티가 전부 초기화된 뒤에만 허용되므로, claim 판단을 그보다 앞에 끝낸다.
-        let claimed = WorkspaceStorage.shared.claimNextWindowState()
+        let claimed = WorkspaceStorage.shared.claimNextWindowState(kind: windowKind)
         if let claimed {
             windowStateId = claimed.id
         } else {
             windowStateId = UUID()
-            WorkspaceStorage.shared.registerClaimed(windowStateId)
+            WorkspaceStorage.shared.registerClaimed(windowStateId, kind: windowKind)
         }
 
+        if windowKind == .quick {
+            preferredAppearance = "light"
+        }
         if let claimed {
             restore(from: claimed)
+        } else if windowKind == .quick {
+            // 비어 있는 Quick 창도 창 종류 자체가 재시작 뒤 복원되어야 한다.
+            persistWindowState()
         } else if storage.windowStates.isEmpty && !storage.workspaces.isEmpty {
             // 업그레이드 경로: 창 상태가 하나도 없으면 레거시 전역 목록(workspaces.json)을
             // 첫 창으로 1회 이관한다. 이후 생성되는 새 창(Cmd+N)은 빈 목록으로 시작.
@@ -63,6 +71,13 @@ class AppState: ObservableObject {
     }
 
     private func restore(from state: WindowState) {
+        if windowKind == .quick {
+            sessions = (state.quickTabs ?? []).map { TerminalSession(snapshot: $0) }
+            selectedSession = sessions.first(where: { $0.id == state.selectedQuickTabId }) ?? sessions.first
+            preferredAppearance = "light"
+            return
+        }
+
         // 레거시 상태(workspaces 없음)는 전역 목록에서 1회 이관
         workspaces = state.workspaces ?? storage.workspaces
         if let appearance = state.appearance {
@@ -96,14 +111,18 @@ class AppState: ObservableObject {
         }
         WorkspaceStorage.shared.updateWindowState(WindowState(
             id: windowStateId,
+            kind: windowKind,
             selectedWorkspaceId: selectedWorkspace?.id,
             workspaces: workspaces,
             workspaceTabs: wsStates,
+            selectedQuickTabId: windowKind == .quick ? selectedSession?.id : nil,
+            quickTabs: windowKind == .quick ? sessions.map { $0.snapshot() } : nil,
             appearance: preferredAppearance
         ))
     }
 
     func setAppearance(_ raw: String) {
+        guard windowKind == .workspace else { return }
         preferredAppearance = raw
         persistWindowState()
     }
