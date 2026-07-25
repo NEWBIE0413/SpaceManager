@@ -6,9 +6,6 @@ extension Color {
     static let warmPink = Color(red: 0.95, green: 0.45, blue: 0.50)
     /// Slightly muted warm pink for section headers
     static let warmPinkMuted = Color(red: 0.78, green: 0.48, blue: 0.50)
-    /// 아일랜드·사이드바가 공유하는 딥 다크 — 라이트 모드에서도 좌측 패널은
-    /// 이 톤을 유지한다 (아일랜드의 "완전 다크"를 패널로 연장한 디자인 결정)
-    static let panelDark = Color(white: 0.07)
 }
 
 /// 사이드바 공통 룩 — 행 높이·아이콘 크기·라운딩을 한 곳에서 통일한다.
