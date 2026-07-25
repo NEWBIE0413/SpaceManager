@@ -36,6 +36,9 @@ final class PTYProcessTests: XCTestCase {
     func testWriteReachesChildProcess() throws {
         let pty = PTYProcess()
         let sawEcho = expectation(description: "cat echoes input")
+        // PTY line discipline echo와 cat 출력이 별도 read로 오면 같은 문자열을
+        // 두 번 관찰할 수 있다. 한 번 이상 도달했는지만 이 테스트의 계약이다.
+        sawEcho.assertForOverFulfill = false
         pty.onOutput = { data in
             if let s = String(data: data, encoding: .utf8), s.contains("ping-42") {
                 sawEcho.fulfill()
