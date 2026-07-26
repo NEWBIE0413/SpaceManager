@@ -10,7 +10,7 @@ final class QuickSessionTests: XCTestCase {
                 tmuxSessionName: nil,
                 workingDirectory: QuickSessionPolicy.workingDirectory
             ),
-            ["-lc", #"exec ccv -y --model "$SM_MODEL" --effort "$SM_EFFORT""#]
+            ["-lc", #"exec "$SM_CCV" -y --model "$SM_MODEL" --effort "$SM_EFFORT""#]
         )
     }
 
@@ -24,7 +24,7 @@ final class QuickSessionTests: XCTestCase {
                 workingDirectory: QuickSessionPolicy.workingDirectory,
                 quickLaunch: launch
             ),
-            ["-lc", #"exec ccv -y --model "$SM_MODEL" --effort "$SM_EFFORT" "$SM_INITIAL_PROMPT""#]
+            ["-lc", #"exec "$SM_CCV" -y --model "$SM_MODEL" --effort "$SM_EFFORT" "$SM_INITIAL_PROMPT""#]
         )
         XCTAssertEqual(
             QuickSessionPolicy.environment(for: launch)["SM_INITIAL_PROMPT"],
@@ -46,7 +46,7 @@ final class QuickSessionTests: XCTestCase {
                 workingDirectory: QuickSessionPolicy.workingDirectory,
                 quickLaunch: launch
             ),
-            ["-lc", #"exec ccv -ry "$SM_RESUME_SESSION_ID" --model "$SM_MODEL" --effort "$SM_EFFORT""#]
+            ["-lc", #"exec "$SM_CCV" -ry "$SM_RESUME_SESSION_ID" --model "$SM_MODEL" --effort "$SM_EFFORT""#]
         )
         XCTAssertEqual(
             QuickSessionPolicy.environment(for: launch)["SM_RESUME_SESSION_ID"],
@@ -67,6 +67,9 @@ final class QuickSessionTests: XCTestCase {
         )
         XCTAssertNil(direct["ANTHROPIC_BASE_URL"])
         XCTAssertNil(direct["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"])
+        XCTAssertEqual(direct["SM_CCV"], QuickSessionPolicy.ccvExecutablePath)
+        XCTAssertTrue(direct["PATH"]?.hasPrefix(NSHomeDirectory() + "/.local/bin:/opt/homebrew/bin:") == true)
+        XCTAssertTrue(QuickSessionPolicy.ccvExecutablePath.hasPrefix("/"))
 
         let proxy = QuickSessionPolicy.applyingEnvironment(
             inherited,

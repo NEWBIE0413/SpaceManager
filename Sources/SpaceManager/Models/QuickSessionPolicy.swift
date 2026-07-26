@@ -10,6 +10,12 @@ enum QuickLaunch: Equatable {
 enum QuickSessionPolicy {
     static let initialSessionName = "새 대화 세션"
 
+    static var ccvExecutablePath: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("myworld/ccv", isDirectory: false)
+            .path
+    }
+
     static var workingDirectory: String {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("cld", isDirectory: true)
@@ -34,11 +40,11 @@ enum QuickSessionPolicy {
     ) -> String {
         switch launch {
         case .blank:
-            return #"exec ccv -y --model "$SM_MODEL" --effort "$SM_EFFORT""#
+            return #"exec "$SM_CCV" -y --model "$SM_MODEL" --effort "$SM_EFFORT""#
         case .initialPrompt:
-            return #"exec ccv -y --model "$SM_MODEL" --effort "$SM_EFFORT" "$SM_INITIAL_PROMPT""#
+            return #"exec "$SM_CCV" -y --model "$SM_MODEL" --effort "$SM_EFFORT" "$SM_INITIAL_PROMPT""#
         case .resume:
-            return #"exec ccv -ry "$SM_RESUME_SESSION_ID" --model "$SM_MODEL" --effort "$SM_EFFORT""#
+            return #"exec "$SM_CCV" -ry "$SM_RESUME_SESSION_ID" --model "$SM_MODEL" --effort "$SM_EFFORT""#
         }
     }
 
@@ -47,6 +53,7 @@ enum QuickSessionPolicy {
         configuration: QuickSessionConfiguration = .default
     ) -> [String: String] {
         var environment = [
+            "SM_CCV": ccvExecutablePath.replacingOccurrences(of: "\0", with: ""),
             "SM_MODEL": configuration.modelID.replacingOccurrences(of: "\0", with: ""),
             "SM_EFFORT": configuration.effort.rawValue,
         ]
@@ -71,6 +78,15 @@ enum QuickSessionPolicy {
         configuration: QuickSessionConfiguration
     ) -> [String: String] {
         var result = base
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let requiredPaths = [home + "/.local/bin", "/opt/homebrew/bin"]
+        let inheritedPaths = (result["PATH"] ?? "")
+            .split(separator: ":")
+            .map(String.init)
+        result["PATH"] = (requiredPaths + inheritedPaths).reduce(into: [String]()) { paths, path in
+            guard !path.isEmpty, !paths.contains(path) else { return }
+            paths.append(path)
+        }.joined(separator: ":")
         // A direct Claude session must stay direct even if SpaceManager itself
         // was launched from a shell that happened to have gateway variables.
         result.removeValue(forKey: "ANTHROPIC_BASE_URL")
