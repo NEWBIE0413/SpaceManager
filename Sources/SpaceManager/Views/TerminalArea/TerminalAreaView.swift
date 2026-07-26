@@ -151,12 +151,14 @@ struct QuickHomeView: View {
             if modelID.hasPrefix("claude-codex-") {
                 proxyEnabled = true
             }
+            constrainSelectedEffort()
         }
         .onChange(of: modelCatalog.models) { _, models in
             if !models.contains(where: { $0.id == selectedModelID }) {
                 selectedModelID = QuickSessionConfiguration.default.modelID
                 proxyEnabled = false
             }
+            constrainSelectedEffort()
         }
     }
 
@@ -185,18 +187,16 @@ struct QuickHomeView: View {
 
     private var modelPicker: some View {
         Menu {
-            Picker("모델", selection: $selectedModelID) {
-                Section("Claude") {
-                    ForEach(modelCatalog.models.filter { !$0.isCodex }) { model in
-                        Text(model.displayName).tag(model.id)
-                    }
+            Section("Claude") {
+                ForEach(modelCatalog.models.filter { !$0.isCodex }) { model in
+                    modelButton(model)
                 }
-                let codexModels = modelCatalog.models.filter(\.isCodex)
-                if !codexModels.isEmpty {
-                    Section("Codex · 프록시") {
-                        ForEach(codexModels) { model in
-                            Text(model.displayName).tag(model.id)
-                        }
+            }
+            let codexModels = modelCatalog.models.filter(\.isCodex)
+            if !codexModels.isEmpty {
+                Section("Codex · 프록시") {
+                    ForEach(codexModels) { model in
+                        modelButton(model)
                     }
                 }
             }
@@ -210,9 +210,15 @@ struct QuickHomeView: View {
 
     private var effortPicker: some View {
         Menu {
-            Picker("Effort", selection: $selectedEffort) {
-                ForEach(QuickEffort.allCases) { effort in
-                    Text(effort.displayName).tag(effort)
+            ForEach(selectedModel.supportedEfforts) { effort in
+                Button {
+                    selectedEffort = effort
+                } label: {
+                    if selectedEffort == effort {
+                        Label(effort.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(effort.displayName)
+                    }
                 }
             }
         } label: {
@@ -221,6 +227,24 @@ struct QuickHomeView: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .help("응답 생성 effort")
+    }
+
+    private func modelButton(_ model: QuickModelOption) -> some View {
+        Button {
+            selectedModelID = model.id
+        } label: {
+            if selectedModelID == model.id {
+                Label(model.displayName, systemImage: "checkmark")
+            } else {
+                Text(model.displayName)
+            }
+        }
+    }
+
+    private func constrainSelectedEffort() {
+        let efforts = selectedModel.supportedEfforts
+        guard !efforts.contains(selectedEffort) else { return }
+        selectedEffort = efforts.contains(.high) ? .high : (efforts.first ?? .high)
     }
 
     private var proxyButton: some View {

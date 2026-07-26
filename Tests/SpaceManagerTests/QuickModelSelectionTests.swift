@@ -20,8 +20,8 @@ final class QuickModelSelectionTests: XCTestCase {
         let data = Data(#"""
         {
           "data": [
-            {"id":"claude-sonnet-5","display_name":"Claude Sonnet 5"},
-            {"id":"claude-codex-gpt-5.6-terra","display_name":"Codex · GPT-5.6-Terra"},
+            {"id":"claude-sonnet-5","display_name":"Claude Sonnet 5","supported_efforts":["low","high","max"]},
+            {"id":"claude-codex-gpt-5.6-terra","display_name":"Codex · GPT-5.6-Terra","supported_efforts":["low","ultra"]},
             {"id":"claude-sonnet-5","display_name":"Duplicate"},
             {"id":"other-model","display_name":"Ignored"}
           ]
@@ -36,6 +36,8 @@ final class QuickModelSelectionTests: XCTestCase {
         ])
         XCTAssertFalse(models[0].isCodex)
         XCTAssertTrue(models[1].isCodex)
+        XCTAssertEqual(models[0].supportedEfforts, [.low, .high, .max])
+        XCTAssertEqual(models[1].supportedEfforts, [.low, .ultra])
     }
 
     func testCodexSelectionAlwaysUsesProxyWhileClaudeCanStayDirect() {
@@ -54,5 +56,35 @@ final class QuickModelSelectionTests: XCTestCase {
                 proxyEnabled: false
             ).usesProxy
         )
+    }
+
+    func testClaudeCLIStringTableRejectsLegacyNoiseAndFindsOpus5() {
+        let models = ClaudeCLIModelDiscovery.parseStringTable("""
+        claude-opus-4-7
+        unrelated text
+        claude-fable-5
+        Claude Fable 5
+        claude-opus-5
+        Claude Opus 5
+        claude-sonnet-5
+        Claude Sonnet 5
+        claude-opus-5
+        Claude Opus 5
+        """)
+
+        XCTAssertEqual(models.map(\.id), [
+            "claude-fable-5",
+            "claude-opus-5",
+            "claude-sonnet-5",
+        ])
+        XCTAssertEqual(models[1].displayName, "Claude Opus 5")
+        XCTAssertEqual(models[1].supportedEfforts, [.low, .medium, .high, .xhigh, .max])
+    }
+
+    func testInstalledClaudeCatalogContainsOpus5() {
+        let models = ClaudeCLIModelDiscovery.discover()
+        XCTAssertTrue(models.contains {
+            $0.id == "claude-opus-5" && $0.displayName == "Claude Opus 5"
+        })
     }
 }

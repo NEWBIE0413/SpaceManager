@@ -1,12 +1,13 @@
 import Foundation
 import Combine
 
-enum QuickEffort: String, CaseIterable, Identifiable {
+enum QuickEffort: String, CaseIterable, Identifiable, Codable, Sendable {
     case low
     case medium
     case high
     case xhigh
     case max
+    case ultra
 
     var id: String { rawValue }
 
@@ -17,13 +18,15 @@ enum QuickEffort: String, CaseIterable, Identifiable {
         case .high: return "높음"
         case .xhigh: return "매우 높음"
         case .max: return "최대"
+        case .ultra: return "울트라"
         }
     }
 }
 
-struct QuickModelOption: Codable, Hashable, Identifiable {
+struct QuickModelOption: Codable, Hashable, Identifiable, Sendable {
     let id: String
     let displayName: String
+    let supportedEfforts: [QuickEffort]
 
     var isCodex: Bool {
         id.hasPrefix("claude-codex-")
@@ -32,6 +35,27 @@ struct QuickModelOption: Codable, Hashable, Identifiable {
     private enum CodingKeys: String, CodingKey {
         case id
         case displayName = "display_name"
+        case supportedEfforts = "supported_efforts"
+    }
+
+    init(
+        id: String,
+        displayName: String,
+        supportedEfforts: [QuickEffort] = [.low, .medium, .high, .xhigh, .max]
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.supportedEfforts = supportedEfforts
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        supportedEfforts = try container.decodeIfPresent(
+            [QuickEffort].self,
+            forKey: .supportedEfforts
+        ) ?? [.low, .medium, .high, .xhigh, .max]
     }
 }
 
@@ -96,7 +120,11 @@ final class QuickModelCatalog: ObservableObject {
                 self?.routerAvailable = true
             } catch {
                 guard !Task.isCancelled else { return }
-                self?.models = Self.fallbackModels
+                let cliModels = await Task.detached(priority: .utility) {
+                    ClaudeCLIModelDiscovery.discover()
+                }.value
+                guard !Task.isCancelled else { return }
+                self?.models = cliModels.isEmpty ? Self.fallbackModels : cliModels
                 self?.routerAvailable = false
             }
             self?.isLoading = false
@@ -112,5 +140,63 @@ final class QuickModelCatalog: ObservableObject {
         return decoded.data.filter { option in
             option.id.hasPrefix("claude-") && seen.insert(option.id).inserted
         }
+    }
+}
+
+enum ClaudeCLIModelDiscovery {
+    static func discover(
+        executablePath: String? = nil,
+        stringsPath: String = "/usr/bin/strings"
+    ) -> [QuickModelOption] {
+        let candidate = executablePath ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/bin/claude")
+            .path
+        let executable = URL(fileURLWithPath: candidate).resolvingSymlinksInPath().path
+        guard FileManager.default.isReadableFile(atPath: executable),
+              FileManager.default.isExecutableFile(atPath: stringsPath) else { return [] }
+
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: stringsPath)
+        process.arguments = ["-a", executable]
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0,
+                  let output = String(data: data, encoding: .utf8) else { return [] }
+            return parseStringTable(output)
+        } catch {
+            return []
+        }
+    }
+
+    static func parseStringTable(_ output: String) -> [QuickModelOption] {
+        let lines = output.split(whereSeparator: \.isNewline).map {
+            String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        var models: [QuickModelOption] = []
+        var seen: Set<String> = []
+        for index in 1..<lines.count {
+            guard let model = parsePair(idLine: lines[index - 1], displayLine: lines[index]),
+                  seen.insert(model.id).inserted else { continue }
+            models.append(model)
+        }
+        return models
+    }
+
+    private static func parsePair(idLine: String, displayLine: String) -> QuickModelOption? {
+        let pieces = idLine.split(separator: "-").map(String.init)
+        let families: Set<String> = ["fable", "mythos", "opus", "sonnet", "haiku"]
+        guard pieces.count >= 3,
+              pieces[0] == "claude",
+              families.contains(pieces[1]),
+              pieces.dropFirst(2).allSatisfy({ Int($0) != nil }) else { return nil }
+        let expectedDisplay = "Claude \(pieces[1].capitalized) "
+            + pieces.dropFirst(2).joined(separator: ".")
+        guard displayLine == expectedDisplay else { return nil }
+        return QuickModelOption(id: idLine, displayName: displayLine)
     }
 }
