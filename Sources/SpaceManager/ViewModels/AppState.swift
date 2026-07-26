@@ -288,10 +288,9 @@ class AppState: ObservableObject {
         } else {
             launch = .blank
         }
-        let name = QuickSessionPolicy.nextName(usedNames: Set(sessions.map(\.name)))
         let session = TerminalSession(
             kind: .quick,
-            name: name,
+            name: QuickSessionPolicy.initialSessionName,
             workingDirectory: QuickSessionPolicy.ensureWorkingDirectory(),
             quickLaunch: launch,
             quickConfiguration: configuration
@@ -302,6 +301,12 @@ class AppState: ObservableObject {
     }
 
     func resumeQuickConversation(sessionId: String) {
+        if let existing = sessions.first(where: {
+            $0.matchesQuickConversation(sessionId: sessionId)
+        }) {
+            selectSession(existing)
+            return
+        }
         addQuickSession(resumeSessionId: sessionId)
     }
 

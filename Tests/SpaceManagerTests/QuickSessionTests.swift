@@ -2,11 +2,8 @@ import XCTest
 @testable import SpaceManager
 
 final class QuickSessionTests: XCTestCase {
-    func testQuickSessionUsesFirstAvailableNumberAndDirectClaudePTY() {
-        XCTAssertEqual(
-            QuickSessionPolicy.nextName(usedNames: ["q-1", "q-2", "project"]),
-            "q-3"
-        )
+    func testQuickSessionUsesFriendlyInitialNameAndDirectClaudePTY() {
+        XCTAssertEqual(QuickSessionPolicy.initialSessionName, "새 대화 세션")
         XCTAssertEqual(
             TerminalSession.launchArguments(
                 kind: .quick,
@@ -121,5 +118,38 @@ final class QuickSessionTests: XCTestCase {
         XCTAssertNil(state.selectedSession)
         XCTAssertEqual(state.sessions.map(\.id), [session.id])
         session.cleanup()
+    }
+
+    func testRecentConversationSelectsAlreadyOpenResumeTab() {
+        let sessionId = UUID().uuidString.lowercased()
+        let state = AppState(windowKind: .quick)
+        let other = TerminalSession(
+            kind: .quick,
+            name: QuickSessionPolicy.initialSessionName,
+            workingDirectory: QuickSessionPolicy.workingDirectory
+        )
+        let resumed = TerminalSession(
+            kind: .quick,
+            name: "Existing title",
+            workingDirectory: QuickSessionPolicy.workingDirectory,
+            quickLaunch: .resume(sessionId: sessionId)
+        )
+        state.sessions = [other, resumed]
+        state.selectedSession = other
+
+        state.resumeQuickConversation(sessionId: sessionId)
+
+        XCTAssertIdentical(state.selectedSession, resumed)
+        XCTAssertEqual(state.sessions.count, 2)
+    }
+
+    func testUnresolvedBlankTabDoesNotClaimRecentConversationIdentity() {
+        let blank = TerminalSession(
+            kind: .quick,
+            name: QuickSessionPolicy.initialSessionName,
+            workingDirectory: QuickSessionPolicy.workingDirectory
+        )
+
+        XCTAssertFalse(blank.matchesQuickConversation(sessionId: UUID().uuidString))
     }
 }

@@ -6,8 +6,10 @@ enum QuickLaunch: Equatable {
     case resume(sessionId: String)
 }
 
-/// 헤르메스 창의 일상 대화 탭 규칙. q-N은 창 안의 표시명일 뿐 tmux 세션명이 아니다.
+/// 헤르메스 창의 일상 대화 탭 규칙. 탭은 tmux와 무관한 일회성 PTY다.
 enum QuickSessionPolicy {
+    static let initialSessionName = "새 대화 세션"
+
     static var workingDirectory: String {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("cld", isDirectory: true)
@@ -79,11 +81,4 @@ enum QuickSessionPolicy {
         return result
     }
 
-    static func nextName(usedNames: Set<String>) -> String {
-        var number = 1
-        while usedNames.contains("q-\(number)") {
-            number += 1
-        }
-        return "q-\(number)"
-    }
 }

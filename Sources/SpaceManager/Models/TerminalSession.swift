@@ -179,6 +179,10 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
         name = title
     }
 
+    func matchesQuickConversation(sessionId: String) -> Bool {
+        kind == .quick && quickSessionId == sessionId
+    }
+
     /// 죽은 탭 재시작 (프로세스 종료·시작 실패 후 재시도)
     func restartIfDead() {
         guard started, pty?.isRunning != true else { return }
