@@ -85,7 +85,7 @@ Ad-hoc re-signing may require macOS Accessibility and Screen Recording permissio
 
 1. Add a project folder from the `WORKSPACES` sidebar.
 2. Select it. SpaceManager attaches to the tmux session derived from the workspace name, creating that session only when it does not already exist.
-3. Use tmux panes for agents and `tmux-bridge` for cross-pane messages.
+3. Use tmux panes for agents and [`tmux-bridge`](https://github.com/ShawnPana/smux) for cross-pane messages. The CLI is included in the smux repository.
 4. Open another workspace window with `Command-N`.
 5. Open the session-based window with `Command-Option-N`. Choose a model, effort level, and direct or proxy mode in the composer.
 6. Click a recent conversation to resume its transcript-backed session.
@@ -125,7 +125,7 @@ When the router is unavailable, the session-based window keeps the direct Claude
 ## Credits
 
 - Demo recorded with [OpenScreen](https://github.com/siddharthvaddem/openscreen).
-- Agent orchestration uses the `smux` skill by shownpana. The development of SpaceManager itself was coordinated through this protocol.
+- Agent orchestration uses the [smux](https://github.com/ShawnPana/smux) skill by [ShawnPana](https://github.com/ShawnPana). The development of SpaceManager itself was coordinated through this protocol.
 - Terminal rendering uses [xterm.js](https://github.com/xtermjs/xterm.js).
 - Session management and recovery use [tmux](https://github.com/tmux/tmux), [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect), and [tmux-continuum](https://github.com/tmux-plugins/tmux-continuum).
 
