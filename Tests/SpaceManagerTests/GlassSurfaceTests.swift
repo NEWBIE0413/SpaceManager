@@ -16,11 +16,9 @@ final class GlassSurfaceTests: XCTestCase {
 
         let glass = BehindWindowGlassNSView(role: .workspaceSidebar)
         XCTAssertEqual(glass.blendingMode, .behindWindow)
-        XCTAssertEqual(glass.state, .active)
+        XCTAssertEqual(glass.state, .followsWindowActiveState)
         XCTAssertEqual(glass.material, .sidebar)
-        if #available(macOS 26.0, *) {
-            XCTAssertTrue(glass.subviews.contains { $0 is NSGlassEffectView })
-        }
+        XCTAssertTrue(glass.subviews.isEmpty)
     }
 
     func testSurfacePolicies() {
@@ -32,16 +30,8 @@ final class GlassSurfaceTests: XCTestCase {
             GlassSurfacePolicy.material(for: .quickSidebar),
             .sidebar
         )
-        XCTAssertLessThan(
-            GlassSurfacePolicy.tintColor(for: .canvasLight).alphaComponent,
-            GlassSurfacePolicy.tintColor(for: .quickSidebar).alphaComponent
-        )
-        XCTAssertLessThan(
-            GlassSurfacePolicy.tintColor(for: .canvasDark).alphaComponent,
-            GlassSurfacePolicy.tintColor(for: .workspaceSidebar).alphaComponent
-        )
-        XCTAssertEqual(GlassSurfacePolicy.cornerRadius(for: .quickSidebar), 16)
-        XCTAssertEqual(GlassSurfacePolicy.cornerRadius(for: .canvasLight), 0)
+        XCTAssertEqual(GlassSurfacePolicy.canvasColor(for: .canvasDark), .windowBackgroundColor)
+        XCTAssertEqual(GlassSurfacePolicy.canvasColor(for: .canvasLight).alphaComponent, 1)
         XCTAssertEqual(
             GlassSurfacePolicy.terminalCardColor(for: .workspace).alphaComponent,
             1
