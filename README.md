@@ -1,148 +1,91 @@
 # SpaceManager
 
-A terminal-centric IDE for the age of AI agents.
+[![SpaceManager demo](demo.gif)](docs/demo.mp4)
+
+<p align="center"><a href="docs/demo.mp4"><strong>전체 데모 영상 보기 (MP4)</strong></a></p>
+
+**tmux 기반 smux 스킬 멀티 에이전트 오케스트레이션을 위한 macOS IDE.**
+
+SpaceManager는 프로젝트와 에이전트를 터미널 pane 단위로 운영하는 네이티브 작업 공간입니다. 앱이 tmux를 대체하거나 소유하지 않고, 이미 살아 있는 세션을 이름으로 따라가며 여러 창에서 일관되게 보여줍니다.
 
 ![macOS](https://img.shields.io/badge/macOS-14.0+-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.9+-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-## Why SpaceManager?
+## 주요 기능
 
-These days, when I do "vibe coding," I hardly look at the code. I'm always just talking to agents after running them in VS Code or a command shell. But VS Code is code-centric, not terminal-centric. Well, I guess that's natural since it's a traditional IDE.
+- **워크스페이스 = tmux 세션 팔로워** — 폴더를 선택하면 같은 이름의 tmux 세션에 attach합니다. 세션 저장과 복원은 tmux-resurrect/continuum에 맡기고 SpaceManager는 기존 서버를 소유하거나 종료하지 않습니다.
+- **에이전트 pane 오케스트레이션** — [`tmux-bridge`](https://github.com/shownpana)를 통해 Claude, Codex, Gemini 같은 CLI 에이전트가 pane을 찾고 읽고 메시지를 주고받습니다. 여러 프로젝트와 에이전트의 상태를 한 화면에서 확인할 수 있습니다.
+- **Hermes 퀵 창** — 프로젝트를 만들지 않고 `~/cld`에서 일상 Claude 대화를 시작합니다. transcript의 `ai-title`로 탭과 창 제목이 갱신되며, 최근 대화를 클릭해 바로 이어갈 수 있습니다.
+- **Claude + Codex 모델 선택** — 모델과 effort를 컴포저에서 선택합니다. Claude는 직접 실행하고, 선택적 로컬 Claude proxy를 사용하면 Codex 구독 OAuth 모델도 같은 UI에서 시작하거나 proxy 세션 안에서 전환할 수 있습니다.
+- **transcript 기반 활동 표시** — Claude, Codex, Gemini transcript를 스캔해 워크스페이스별 최근 활동과 실제 생성 중 상태를 사이드바 dot으로 보여줍니다.
+- **네이티브 멀티 윈도우** — 창마다 독립적인 워크스페이스 상태를 유지하며, 다른 창이 소유한 워크스페이스로도 한 번에 점프합니다.
+- **터미널 중심 UI** — xterm.js WebGL 렌더링, PTY, 마우스 입력, TUI, 한글 IME, 네이티브 복사·붙여넣기를 지원합니다. 유리 사이드바와 떠 있는 터미널 카드가 작업 공간을 분리합니다.
 
-**That's why I created an IDE exclusively for the CLI.**
+## Architecture
 
-Every workspace is a real tmux session, attached by name the moment you select it. Open a shell tab, a second tmux tab, a second window — the terminal is the whole interface.
+```text
+SwiftUI + AppKit window chrome
+├── per-window AppState and workspace registry
+├── transcript scanners (Claude / Codex / Gemini)
+├── Hermes quick conversations and model catalog
+└── terminal card
+    ├── WKWebView + vendored xterm.js (terminal surface only)
+    ├── local forkpty shim
+    └── tmux client attach
+```
 
-**Happy vibe coding!**
-
-## Features
-
-- **Real Terminal**: xterm.js-based terminal (same engine as VS Code) — full mouse support, TUI apps, IME, native copy/paste
-- **tmux-Native Workspaces**: Selecting a workspace auto-attaches to its tmux session by name. Pair with tmux-resurrect/continuum and everything survives reboots
-- **Multi-Window**: Every window is a full IDE — put a different project on each Space
-- **Terminal Tabs**: Plain shell tabs or extra tmux session tabs, folded into a list under the active workspace in the sidebar
-- **File Browser**: Read-only project tree in the sidebar for quick reference
-
-## Demo
-
-![SpaceManager Demo](demo.gif)
+- 창, 사이드바, 상태 관리는 **SwiftUI + AppKit** 네이티브 코드입니다.
+- 웹 기술은 터미널 표면의 **WKWebView + xterm.js**에만 사용합니다.
+- PTY는 작은 로컬 C shim이 담당합니다.
+- tmux는 진실원입니다. SpaceManager는 순수 팔로워로 attach하며 세션 수명주기를 가로채지 않습니다.
 
 ## Requirements
 
 - macOS 14.0+
-- Xcode 15.0+ (for building)
-- [tmux](https://github.com/tmux/tmux) installed and on `PATH` (workspaces show a banner and fall back to plain shell tabs if it's missing)
+- Xcode 15.0+ 또는 호환 Swift toolchain
+- [`tmux`](https://github.com/tmux/tmux)
+- 재부팅 복원이 필요하면 [`tmux-resurrect`](https://github.com/tmux-plugins/tmux-resurrect) + [`tmux-continuum`](https://github.com/tmux-plugins/tmux-continuum)
 
-## Installation
-
-### Build from Source
+## Build
 
 ```bash
 git clone https://github.com/NEWBIE0413/SpaceManager.git
 cd SpaceManager
 swift build -c release
-```
-
-### Run
-
-```bash
 swift run SpaceManager
 ```
 
-Or open in Xcode:
-```bash
-open Package.swift
+터미널 의존성은 저장소에 포함되어 있어 별도 JavaScript 설치 과정이 없습니다.
+
+## Quick Start
+
+1. `WORKSPACES` 옆 `+`에서 프로젝트 루트 폴더를 추가합니다.
+2. 워크스페이스를 선택하면 메인 tmux 세션에 자동으로 attach됩니다.
+3. 사이드바의 `+`로 shell 또는 추가 tmux 탭을 열고, `smux`로 에이전트 pane을 연결합니다.
+4. `Cmd+Opt+N`으로 Hermes를 열면 폴더 설정 없이 새 대화를 시작하거나 최근 대화를 재개할 수 있습니다.
+
+| 단축키 | 동작 |
+|---|---|
+| `Cmd+N` | 새 워크스페이스 창 |
+| `Cmd+Opt+N` | Hermes 퀵 창 |
+| `Cmd+Shift+N` | 새 워크스페이스 추가 |
+| `Cmd+T` | 새 shell 탭 / Hermes 즉시 대화 |
+| `Cmd+Shift+T` | 새 tmux 탭 |
+| `Cmd+Opt+←` / `Cmd+Opt+→` | 이전 / 다음 탭 |
+
+동일 워크스페이스를 여러 창에서 열면 하나의 tmux 세션에 여러 client가 attach됩니다. 화면 크기는 현재 보고 있는 client를 따르도록 다음 설정을 권장합니다.
+
+```tmux
+set -g window-size latest
 ```
 
-## Usage
+## Credits
 
-### Workspaces
-- Click "+" next to WORKSPACES to create one — pick a root folder, optionally give it a custom name
-- Selecting a workspace auto-attaches its terminal to a tmux session (created if it doesn't exist yet)
-- Right-click a workspace → "Show in Finder", "Rename...", "Edit tmux Session Name...", or "Delete"
-- Drag a workspace row to reorder it in the sidebar list
-
-### Tabs
-- Click "+" in the tab bar to add a tab: a plain shell tab (no tmux, doesn't survive an app restart) or an extra tmux tab (its own named tmux session, restorable)
-- The first tab of a workspace is always its main tmux session
-- When a workspace has 2+ tabs, they appear as an indented list under it in the sidebar — click a tab to switch, hover it and click × to close
-- Cycle tabs with `Cmd+Opt+←` / `Cmd+Opt+→`
-
-### tmux Session Name
-- Right-click a workspace → "Edit tmux Session Name..." to point it at an existing tmux session instead of the auto-derived one — handy when migrating sessions you already had running before installing SpaceManager
-- Leave it blank to fall back to the name derived from the workspace name
-
-### Multi-Window
-- `Cmd+N` opens a new window, each with its own sidebar selection and tabs
-- Window layout (which workspaces/tabs are open, per window) is saved to `~/.space-manager/window-states.json` and restored on next launch
-- Opening the same workspace in two windows attaches two tmux clients to the same session (mirrored) — see [tmux Integration](#tmux-integration) below
-
-## Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Cmd+N` | New Window |
-| `Cmd+Shift+N` | New Workspace |
-| `Cmd+T` | New Shell Tab |
-| `Cmd+Shift+T` | New tmux Tab |
-| `Cmd+Opt+←` / `Cmd+Opt+→` | Previous / Next Tab |
-
-## tmux Integration
-
-SpaceManager doesn't manage tmux sessions itself — it just attaches to them by name, and leaves saving/restoring to your own tmux setup.
-
-- **Session name rule**: a workspace's tmux session name is derived from its workspace name, sanitized — `.`, `:`, and spaces become `-`. Override it per-workspace via the sidebar context menu (see [tmux Session Name](#tmux-session-name) above).
-- **Reboot recovery**: install [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect) + [tmux-continuum](https://github.com/tmux-plugins/tmux-continuum) so your sessions survive a reboot on their own. SpaceManager just re-attaches by name after continuum restores them — it doesn't save or restore session contents.
-- **Multi-window mirroring**: opening the same workspace in two windows attaches two tmux clients to one session, so both mirror the same screen. Add this to `~/.tmux.conf` so the shared session sizes itself to whichever client is actually being looked at, instead of clamping to the smallest window:
-
-  ```
-  set -g window-size latest
-  ```
-
-## Dependencies
-
-None — the terminal is [xterm.js](https://github.com/xtermjs/xterm.js) (the engine VS Code uses), vendored directly in `Sources/SpaceManager/Terminal/Resources/` and rendered in a `WKWebView`. PTY handling is a small local C shim (`Sources/CPty`).
-
-## Project Structure
-
-```
-Sources/
-├── CPty/                        # forkpty-based PTY shim (C)
-└── SpaceManager/
-    ├── SpaceManagerApp.swift    # App entry point, window scenes, menu commands
-    ├── Models/
-    │   ├── Workspace.swift      # Workspace & Project models
-    │   ├── TerminalSession.swift    # Tab model (shell / tmux main / tmux extra)
-    │   ├── TabSnapshot.swift    # Persisted tab/window state
-    │   ├── TmuxBootstrap.swift  # Session name rule, attach/create script, tmux detection
-    │   └── DirectoryWatcher.swift   # Sidebar file browser live updates
-    ├── Storage/
-    │   └── WorkspaceStorage.swift   # JSON persistence (workspaces, window states)
-    ├── Terminal/
-    │   ├── PTYProcess.swift     # forkpty process wrapper
-    │   ├── TerminalWebView.swift    # WKWebView ↔ xterm.js bridge
-    │   ├── TerminalSpikeView.swift  # manual verification harness (SM_SPIKE=1)
-    │   └── Resources/           # vendored xterm.js, xterm.css, terminal.html
-    ├── ViewModels/
-    │   └── AppState.swift       # Per-window app state (sessions, tabs, workspace selection)
-    └── Views/
-        ├── ContentView.swift    # Main two-pane layout
-        ├── Theme.swift
-        ├── Sidebar/             # Workspace list, project/file browser
-        └── TerminalArea/        # Tab bar, terminal view
-```
-
-## Contributing
-
-This application is still a work in progress. I look forward to your contributions!
-
-Feel free to submit a Pull Request or open an Issue.
+- Demo recorded with [OpenScreen](https://github.com/siddharthvaddem/openscreen).
+- Agent orchestration powered by the `smux` skill by [shownpana](https://github.com/shownpana).
+- Terminal rendering powered by [xterm.js](https://github.com/xtermjs/xterm.js).
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
-
-## Acknowledgments
-
-- [xterm.js](https://github.com/xtermjs/xterm.js) for the terminal engine
+[MIT](LICENSE)
