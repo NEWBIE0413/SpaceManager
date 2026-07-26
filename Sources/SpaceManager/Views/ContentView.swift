@@ -42,15 +42,14 @@ struct ContentView: View {
         return appState.selectedWorkspace?.name ?? "SpaceManager"
     }
 
-    private var canvasRole: GlassSurfaceRole {
-        isDarkNow ? .canvasDark : .canvasLight
-    }
-
     var body: some View {
         ZStack(alignment: .top) {
             // 캔버스는 합성 비용 없는 불투명 단색. behind-window 유리는
             // 정보 위계를 만드는 사이드바 한 겹에만 남긴다.
-            Color(nsColor: GlassSurfacePolicy.canvasColor(for: canvasRole))
+            Color(nsColor: GlassSurfacePolicy.canvasColor(
+                for: windowKind,
+                isDark: isDarkNow
+            ))
                 .ignoresSafeArea()
             
             HStack(spacing: 12) {

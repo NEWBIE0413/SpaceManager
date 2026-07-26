@@ -33,6 +33,10 @@ final class GlassSurfaceTests: XCTestCase {
         XCTAssertEqual(GlassSurfacePolicy.canvasColor(for: .canvasDark), .windowBackgroundColor)
         XCTAssertEqual(GlassSurfacePolicy.canvasColor(for: .canvasLight).alphaComponent, 1)
         XCTAssertEqual(
+            GlassSurfacePolicy.canvasColor(for: .quick, isDark: false),
+            .windowBackgroundColor
+        )
+        XCTAssertEqual(
             GlassSurfacePolicy.terminalCardColor(for: .workspace).alphaComponent,
             1
         )

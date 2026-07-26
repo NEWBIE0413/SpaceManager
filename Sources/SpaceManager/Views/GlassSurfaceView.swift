@@ -10,6 +10,13 @@ enum GlassSurfaceRole: Equatable {
 
 /// 캔버스는 불투명 단색, 사이드바만 behind-window blur를 사용한다.
 enum GlassSurfacePolicy {
+    static func canvasColor(for windowKind: WindowKind, isDark: Bool) -> NSColor {
+        if windowKind == .quick {
+            return .windowBackgroundColor
+        }
+        return canvasColor(for: isDark ? .canvasDark : .canvasLight)
+    }
+
     static func material(for role: GlassSurfaceRole) -> NSVisualEffectView.Material {
         switch role {
         case .canvasDark, .canvasLight:
