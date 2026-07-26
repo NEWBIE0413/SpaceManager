@@ -15,7 +15,7 @@ SpaceManager는 프로젝트와 에이전트를 터미널 pane 단위로 운영�
 ## 주요 기능
 
 - **워크스페이스 = tmux 세션 팔로워** — 폴더를 선택하면 같은 이름의 tmux 세션에 attach합니다. 세션 저장과 복원은 tmux-resurrect/continuum에 맡기고 SpaceManager는 기존 서버를 소유하거나 종료하지 않습니다.
-- **에이전트 pane 오케스트레이션** — [`tmux-bridge`](https://github.com/shownpana)를 통해 Claude, Codex, Gemini 같은 CLI 에이전트가 pane을 찾고 읽고 메시지를 주고받습니다. 여러 프로젝트와 에이전트의 상태를 한 화면에서 확인할 수 있습니다.
+- **에이전트 pane 오케스트레이션** — `tmux-bridge`를 통해 Claude, Codex, Gemini 같은 CLI 에이전트가 pane을 찾고 읽고 메시지를 주고받습니다. 여러 프로젝트와 에이전트의 상태를 한 화면에서 확인할 수 있습니다.
 - **Hermes 퀵 창** — 프로젝트를 만들지 않고 `~/cld`에서 일상 Claude 대화를 시작합니다. transcript의 `ai-title`로 탭과 창 제목이 갱신되며, 최근 대화를 클릭해 바로 이어갈 수 있습니다.
 - **Claude + Codex 모델 선택** — 모델과 effort를 컴포저에서 선택합니다. Claude는 직접 실행하고, 선택적 로컬 Claude proxy를 사용하면 Codex 구독 OAuth 모델도 같은 UI에서 시작하거나 proxy 세션 안에서 전환할 수 있습니다.
 - **transcript 기반 활동 표시** — Claude, Codex, Gemini transcript를 스캔해 워크스페이스별 최근 활동과 실제 생성 중 상태를 사이드바 dot으로 보여줍니다.
@@ -83,7 +83,7 @@ set -g window-size latest
 ## Credits
 
 - Demo recorded with [OpenScreen](https://github.com/siddharthvaddem/openscreen).
-- Agent orchestration powered by the `smux` skill by [shownpana](https://github.com/shownpana).
+- Agent orchestration powered by the `smux` skill by shownpana.
 - Terminal rendering powered by [xterm.js](https://github.com/xtermjs/xterm.js).
 
 ## License
