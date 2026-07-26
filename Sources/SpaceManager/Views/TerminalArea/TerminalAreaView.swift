@@ -59,10 +59,17 @@ struct QuickHomeView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var modelCatalog = QuickModelCatalog()
     @State private var prompt = ""
-    @State private var selectedModelID = QuickSessionConfiguration.default.modelID
-    @State private var selectedEffort = QuickSessionConfiguration.default.effort
-    @State private var proxyEnabled = false
+    @State private var selectedModelID: String
+    @State private var selectedEffort: QuickEffort
+    @State private var proxyEnabled: Bool
     @FocusState private var isPromptFocused: Bool
+
+    init() {
+        let saved = QuickComposerPreferences.load()
+        _selectedModelID = State(initialValue: saved.modelID)
+        _selectedEffort = State(initialValue: saved.effort)
+        _proxyEnabled = State(initialValue: saved.proxyEnabled)
+    }
 
     var body: some View {
         VStack(spacing: 28) {
@@ -152,13 +159,23 @@ struct QuickHomeView: View {
                 proxyEnabled = true
             }
             constrainSelectedEffort()
+            persistSelection()
+        }
+        .onChange(of: selectedEffort) {
+            persistSelection()
+        }
+        .onChange(of: proxyEnabled) {
+            persistSelection()
         }
         .onChange(of: modelCatalog.models) { _, models in
-            if !models.contains(where: { $0.id == selectedModelID }) {
-                selectedModelID = QuickSessionConfiguration.default.modelID
-                proxyEnabled = false
-            }
-            constrainSelectedEffort()
+            let resolved = QuickComposerPreferences.resolved(
+                currentConfiguration,
+                availableModels: models
+            )
+            selectedModelID = resolved.modelID
+            selectedEffort = resolved.effort
+            proxyEnabled = resolved.proxyEnabled
+            QuickComposerPreferences.save(resolved)
         }
     }
 
@@ -245,6 +262,18 @@ struct QuickHomeView: View {
         let efforts = selectedModel.supportedEfforts
         guard !efforts.contains(selectedEffort) else { return }
         selectedEffort = efforts.contains(.high) ? .high : (efforts.first ?? .high)
+    }
+
+    private var currentConfiguration: QuickSessionConfiguration {
+        QuickSessionConfiguration(
+            modelID: selectedModelID,
+            effort: selectedEffort,
+            proxyEnabled: proxyEnabled
+        )
+    }
+
+    private func persistSelection() {
+        QuickComposerPreferences.save(currentConfiguration)
     }
 
     private var proxyButton: some View {

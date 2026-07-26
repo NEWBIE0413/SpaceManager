@@ -75,6 +75,51 @@ struct QuickSessionConfiguration: Equatable {
     }
 }
 
+enum QuickComposerPreferences {
+    private static let modelKey = "quickComposer.modelID"
+    private static let effortKey = "quickComposer.effort"
+    private static let proxyKey = "quickComposer.proxyEnabled"
+
+    static func load(from defaults: UserDefaults = .standard) -> QuickSessionConfiguration {
+        guard let modelID = defaults.string(forKey: modelKey),
+              let effortRaw = defaults.string(forKey: effortKey),
+              let effort = QuickEffort(rawValue: effortRaw) else {
+            return .default
+        }
+        return QuickSessionConfiguration(
+            modelID: modelID,
+            effort: effort,
+            proxyEnabled: defaults.bool(forKey: proxyKey)
+        )
+    }
+
+    static func save(
+        _ configuration: QuickSessionConfiguration,
+        to defaults: UserDefaults = .standard
+    ) {
+        defaults.set(configuration.modelID, forKey: modelKey)
+        defaults.set(configuration.effort.rawValue, forKey: effortKey)
+        defaults.set(configuration.proxyEnabled, forKey: proxyKey)
+    }
+
+    static func resolved(
+        _ configuration: QuickSessionConfiguration,
+        availableModels: [QuickModelOption]
+    ) -> QuickSessionConfiguration {
+        guard let model = availableModels.first(where: { $0.id == configuration.modelID }) else {
+            return .default
+        }
+        let effort = model.supportedEfforts.contains(configuration.effort)
+            ? configuration.effort
+            : (model.supportedEfforts.contains(.high) ? .high : model.supportedEfforts.first ?? .high)
+        return QuickSessionConfiguration(
+            modelID: model.id,
+            effort: effort,
+            proxyEnabled: configuration.proxyEnabled
+        )
+    }
+}
+
 @MainActor
 final class QuickModelCatalog: ObservableObject {
     static let fallbackModels: [QuickModelOption] = [
