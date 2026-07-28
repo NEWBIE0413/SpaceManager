@@ -55,6 +55,28 @@ final class WorkspaceWindowRegistry: ObservableObject {
         bumpRevision()
     }
 
+    /// 앱 종료는 SwiftUI 뷰 dismantle보다 먼저 오거나 AppState.deinit 없이
+    /// 프로세스를 내릴 수 있다. 살아 있는 NSWindow에서 마지막 표시 상태를 동기 저장한다.
+    func persistWindowPresentations() {
+        removeDeadEntries()
+        for entry in entries {
+            guard let state = entry.state, let window = entry.window else { continue }
+            let isFullscreen = window.styleMask.contains(.fullScreen)
+            let isZoomed = !isFullscreen && window.isZoomed
+            let frame: WindowFrameState? = (isFullscreen || isZoomed) ? nil : WindowFrameState(
+                x: window.frame.origin.x,
+                y: window.frame.origin.y,
+                width: window.frame.size.width,
+                height: window.frame.size.height
+            )
+            state.updateWindowPresentation(
+                frame: frame,
+                isZoomed: isZoomed,
+                isFullscreen: isFullscreen
+            )
+        }
+    }
+
     func canJump(to cwd: String, preferredState: AppState) -> Bool {
         target(for: cwd, preferredState: preferredState) != nil
     }

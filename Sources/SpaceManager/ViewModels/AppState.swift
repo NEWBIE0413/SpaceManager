@@ -9,6 +9,11 @@ class AppState: ObservableObject {
     let windowKind: WindowKind
     let windowStateId: UUID
 
+    /// NSWindow가 다시 붙을 때 적용할 일반 프레임과 표시 상태.
+    private(set) var restoredWindowFrame: WindowFrameState?
+    private(set) var restoredWindowIsZoomed = false
+    private(set) var restoredWindowIsFullscreen = false
+
     /// 이 창이 소유한 워크스페이스 목록 (창별 독립 — 전역 공유 아님)
     @Published var workspaces: [Workspace] = []
     @Published var selectedWorkspace: Workspace?
@@ -30,16 +35,29 @@ class AppState: ObservableObject {
     @Published var preferredAppearance: String =
         UserDefaults.standard.string(forKey: "preferredAppearance") ?? "system"
 
-    init(windowKind: WindowKind = .workspace) {
+    init(windowKind: WindowKind = .workspace, requestedWindowStateId: UUID? = nil) {
         self.windowKind = windowKind
         // windowStateId(let)를 모든 분기에서 먼저 확정해야 한다 — self.storage 접근(구독 설정)은
         // 저장 프로퍼티가 전부 초기화된 뒤에만 허용되므로, claim 판단을 그보다 앞에 끝낸다.
-        let claimed = WorkspaceStorage.shared.claimNextWindowState(kind: windowKind)
+        let sharedStorage = WorkspaceStorage.shared
+        let claimed: WindowState?
+        if let requestedWindowStateId {
+            claimed = sharedStorage.claimWindowState(id: requestedWindowStateId, kind: windowKind)
+        } else {
+            // scene value가 없던 구 버전/최초 기본 창만 순번 migration을 거친다.
+            claimed = sharedStorage.claimNextWindowState(kind: windowKind)
+        }
         if let claimed {
             windowStateId = claimed.id
         } else {
-            windowStateId = UUID()
-            WorkspaceStorage.shared.registerClaimed(windowStateId, kind: windowKind)
+            // 같은 scene ID가 중복 생성돼 이미 claim된 경우 한 상태를 두 창이 공유하지 않는다.
+            if let requestedWindowStateId,
+               !sharedStorage.containsWindowState(id: requestedWindowStateId) {
+                windowStateId = requestedWindowStateId
+            } else {
+                windowStateId = UUID()
+            }
+            sharedStorage.registerClaimed(windowStateId, kind: windowKind)
         }
 
         if windowKind == .quick {
@@ -74,6 +92,10 @@ class AppState: ObservableObject {
     }
 
     private func restore(from state: WindowState) {
+        restoredWindowFrame = state.frame
+        restoredWindowIsZoomed = state.resolvedIsZoomed
+        restoredWindowIsFullscreen = state.resolvedIsFullscreen
+
         if windowKind == .quick {
             // Quick 탭은 브라우저 탭처럼 프로세스 수명만 가진다. 창 종류만 복원하고
             // 이전 대화 PTY는 되살리지 않는다 (대화 자체는 ccv transcript에 남는다).
@@ -120,8 +142,25 @@ class AppState: ObservableObject {
             selectedWorkspaceId: selectedWorkspace?.id,
             workspaces: workspaces,
             workspaceTabs: wsStates,
-            appearance: preferredAppearance
+            appearance: preferredAppearance,
+            frame: restoredWindowFrame,
+            isZoomed: restoredWindowIsZoomed,
+            isFullscreen: restoredWindowIsFullscreen
         ))
+    }
+
+    /// 이동/리사이즈 알림에서 호출된다. 확대·전체화면 중에는 일반 프레임을 덮지 않는다.
+    func updateWindowPresentation(
+        frame: WindowFrameState?,
+        isZoomed: Bool,
+        isFullscreen: Bool
+    ) {
+        if let frame {
+            restoredWindowFrame = frame
+        }
+        restoredWindowIsZoomed = isZoomed
+        restoredWindowIsFullscreen = isFullscreen
+        persistWindowState()
     }
 
     func setAppearance(_ raw: String) {

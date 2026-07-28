@@ -12,7 +12,10 @@ final class StorageRoundtripTests: XCTestCase {
             id: UUID(),
             kind: .workspace,
             selectedWorkspaceId: wsId,
-            workspaceTabs: [WorkspaceTabsState(workspaceId: wsId, selectedTabId: tab.id, tabs: [tab, shell])]
+            workspaceTabs: [WorkspaceTabsState(workspaceId: wsId, selectedTabId: tab.id, tabs: [tab, shell])],
+            frame: WindowFrameState(x: 120, y: 80, width: 1440, height: 900),
+            isZoomed: true,
+            isFullscreen: false
         )
         let data = try JSONEncoder().encode([state])
         let decoded = try JSONDecoder().decode([WindowState].self, from: data)
@@ -21,6 +24,9 @@ final class StorageRoundtripTests: XCTestCase {
         XCTAssertEqual(decoded[0].resolvedKind, .workspace)
         XCTAssertEqual(decoded[0].workspaceTabs[0].tabs.map(\.kind), [.tmuxMain, .shell])
         XCTAssertEqual(decoded[0].workspaceTabs[0].selectedTabId, tab.id)
+        XCTAssertEqual(decoded[0].frame, state.frame)
+        XCTAssertTrue(decoded[0].resolvedIsZoomed)
+        XCTAssertFalse(decoded[0].resolvedIsFullscreen)
     }
 
     func testWorkspaceDecodesLegacyJSONWithoutNewFields() throws {
@@ -43,6 +49,45 @@ final class StorageRoundtripTests: XCTestCase {
         let state = try JSONDecoder().decode(WindowState.self, from: Data(legacy.utf8))
         XCTAssertNil(state.workspaces)   // 레거시 상태 → 전역 목록 폴백 트리거
         XCTAssertEqual(state.resolvedKind, .workspace)
+        XCTAssertNil(state.frame)
+        XCTAssertFalse(state.resolvedIsZoomed)
+        XCTAssertFalse(state.resolvedIsFullscreen)
+    }
+
+    func testExactWindowClaimIgnoresSavedArrayOrder() throws {
+        let kmongID = UUID()
+        let vthID = UUID()
+        let kmongWorkspaceID = UUID()
+        let vthWorkspaceID = UUID()
+        let states = [
+            WindowState(
+                id: vthID,
+                kind: .workspace,
+                selectedWorkspaceId: vthWorkspaceID,
+                workspaceTabs: []
+            ),
+            WindowState(
+                id: kmongID,
+                kind: .workspace,
+                selectedWorkspaceId: kmongWorkspaceID,
+                workspaceTabs: []
+            )
+        ]
+
+        let claimed = try XCTUnwrap(WorkspaceStorage.exactUnclaimedState(
+            id: kmongID,
+            kind: .workspace,
+            states: states,
+            claimedIDs: []
+        ))
+        XCTAssertEqual(claimed.id, kmongID)
+        XCTAssertEqual(claimed.selectedWorkspaceId, kmongWorkspaceID)
+        XCTAssertNil(WorkspaceStorage.exactUnclaimedState(
+            id: kmongID,
+            kind: .workspace,
+            states: states,
+            claimedIDs: [kmongID]
+        ))
     }
 
     func testQuickWindowStateRoundtrip() throws {

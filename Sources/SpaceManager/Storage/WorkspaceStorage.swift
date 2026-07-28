@@ -102,21 +102,53 @@ class WorkspaceStorage: ObservableObject {
         }
     }
 
-    /// 아직 어떤 창도 가져가지 않은 저장 상태를 하나 claim (인메모리 — 파일은 불변)
+    /// scene에 보존된 ID로 자기 상태만 claim한다. 복원 창의 생성 순서와 무관하다.
+    func claimWindowState(id: UUID, kind: WindowKind) -> WindowState? {
+        guard let state = Self.exactUnclaimedState(
+            id: id,
+            kind: kind,
+            states: windowStates,
+            claimedIDs: claimedWindowStateIds
+        ) else { return nil }
+        markClaimed(state.id, kind: kind)
+        return state
+    }
+
+    /// 저장 배열 순서에 의존하지 않는 claim 핵심. 디스크를 건드리지 않고
+    /// 창 정체성 회귀를 테스트할 수 있게 순수 함수로 둔다.
+    static func exactUnclaimedState(
+        id: UUID,
+        kind: WindowKind,
+        states: [WindowState],
+        claimedIDs: Set<UUID>
+    ) -> WindowState? {
+        guard !claimedIDs.contains(id) else { return nil }
+        return states.first { $0.id == id && $0.resolvedKind == kind }
+    }
+
+    /// scene value가 없던 구 버전 상태의 1회 migration 경로. 새 복원 경로는 ID claim만 쓴다.
     func claimNextWindowState(kind: WindowKind) -> WindowState? {
         guard let state = windowStates.first(where: {
             $0.resolvedKind == kind && !claimedWindowStateIds.contains($0.id)
         }) else {
             return nil
         }
-        claimedWindowStateIds.insert(state.id)
-        claimedWindowKinds[state.id] = kind
+        markClaimed(state.id, kind: kind)
         return state
     }
 
     func registerClaimed(_ id: UUID, kind: WindowKind) {
-        claimedWindowStateIds.insert(id)
-        claimedWindowKinds[id] = kind
+        markClaimed(id, kind: kind)
+    }
+
+    func containsWindowState(id: UUID) -> Bool {
+        windowStates.contains { $0.id == id }
+    }
+
+    func unclaimedWindowStates(for kind: WindowKind) -> [WindowState] {
+        windowStates.filter {
+            $0.resolvedKind == kind && !claimedWindowStateIds.contains($0.id)
+        }
     }
 
     var claimedCount: Int { claimedWindowStateIds.count }
@@ -143,5 +175,10 @@ class WorkspaceStorage: ObservableObject {
         claimedWindowKinds[id] = nil
         windowStates.removeAll { $0.id == id }
         saveWindowStates()
+    }
+
+    private func markClaimed(_ id: UUID, kind: WindowKind) {
+        claimedWindowStateIds.insert(id)
+        claimedWindowKinds[id] = kind
     }
 }

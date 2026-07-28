@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        WorkspaceWindowRegistry.shared.persistWindowPresentations()
         // 종료 시 AppState.deinit이 창 상태를 지우지 않도록 표시
         AppTermination.isTerminating = true
         return .terminateNow
@@ -38,12 +39,12 @@ struct SpaceManagerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup(id: "main") {
+        WindowGroup(id: "main", for: UUID.self) { $windowStateId in
             if ProcessInfo.processInfo.environment["SM_SPIKE"] == "1" {
                 TerminalSpikeView()
                     .frame(minWidth: 900, minHeight: 600)
             } else {
-                ContentView()
+                ContentView(windowStateId: $windowStateId)
                     .frame(minWidth: 900, minHeight: 600)
             }
         }
@@ -52,8 +53,8 @@ struct SpaceManagerApp: App {
             AppCommands()
         }
 
-        WindowGroup(id: "quick") {
-            ContentView(windowKind: .quick)
+        WindowGroup(id: "quick", for: UUID.self) { $windowStateId in
+            ContentView(windowKind: .quick, windowStateId: $windowStateId)
                 .frame(minWidth: 760, minHeight: 520)
         }
         .windowStyle(.hiddenTitleBar)
@@ -68,12 +69,12 @@ struct AppCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Window") {
-                openWindow(id: "main")
+                openWindow(id: "main", value: UUID())
             }
             .keyboardShortcut("n", modifiers: .command)
 
             Button("New Quick Window") {
-                openWindow(id: "quick")
+                openWindow(id: "quick", value: UUID())
             }
             .keyboardShortcut("n", modifiers: [.command, .option])
 
@@ -114,8 +115,7 @@ struct AppCommands: Commands {
     }
 }
 
-/// 앱 시작 시 저장된 창 수만큼 창을 복원한다.
-/// 우리 북키핑(claimedCount) 기준으로 부족분만 열어 시스템 복원과의 중복을 방지.
+    /// 앱 시작 시 아직 macOS scene restoration이 만들지 않은 상태만 정확한 ID로 연다.
 enum WindowRestorer {
     private static var didRun = false
 
@@ -127,10 +127,8 @@ enum WindowRestorer {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             let storage = WorkspaceStorage.shared
             for kind in WindowKind.allCases {
-                let missing = storage.savedCount(for: kind) - storage.claimedCount(for: kind)
-                guard missing > 0 else { continue }
-                for _ in 0..<missing {
-                    openWindow(id: kind.sceneID)
+                for state in storage.unclaimedWindowStates(for: kind) {
+                    openWindow(id: kind.sceneID, value: state.id)
                 }
             }
         }

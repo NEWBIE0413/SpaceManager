@@ -5,14 +5,19 @@ import AppKit
 /// 창마다 하나씩 생성된다 — AppState가 여기 살아야 창별 독립 선택이 가능하다.
 struct ContentView: View {
     private let windowKind: WindowKind
+    @Binding private var sceneWindowStateId: UUID?
     @StateObject private var appState: AppState
     @ObservedObject private var activityScanner = RecentActivityScanner.shared
     @StateObject private var islandHover = IslandHoverState()
     @Environment(\.openWindow) private var openWindow
 
-    init(windowKind: WindowKind = .workspace) {
+    init(windowKind: WindowKind = .workspace, windowStateId: Binding<UUID?> = .constant(nil)) {
         self.windowKind = windowKind
-        _appState = StateObject(wrappedValue: AppState(windowKind: windowKind))
+        _sceneWindowStateId = windowStateId
+        _appState = StateObject(wrappedValue: AppState(
+            windowKind: windowKind,
+            requestedWindowStateId: windowStateId.wrappedValue
+        ))
     }
 
     private var isDarkNow: Bool {
@@ -121,6 +126,11 @@ struct ContentView: View {
                 .environmentObject(appState)
         }
         .onAppear {
+            // WindowGroup scene value는 macOS가 창별로 복원한다. 최초/레거시 nil scene에는
+            // 실제 claim 결과를 기록해 다음 실행부터 같은 WindowState.id를 돌려받는다.
+            if sceneWindowStateId == nil {
+                sceneWindowStateId = appState.windowStateId
+            }
             RecentActivityScanner.shared.start()
             WindowRestorer.openRemainingWindowsIfNeeded(openWindow)
         }
