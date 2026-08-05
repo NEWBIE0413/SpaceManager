@@ -6,6 +6,27 @@ enum PTYError: Error {
     case alreadyStarted
 }
 
+/// PTYProcess가 자식보다 먼저 해제돼 인스턴스의 DispatchSource가 취소되더라도
+/// 부모 프로세스 수명 동안 waitpid 소유권을 유지한다. 정상 exitSource가 먼저
+/// 회수하면 waitpid는 ECHILD로 끝나므로 두 경로의 경합은 안전하다.
+enum PTYChildReaper {
+    private static let queue = DispatchQueue(
+        label: "space-manager.pty.reaper",
+        qos: .utility,
+        attributes: .concurrent
+    )
+
+    static func reap(_ processIdentifier: pid_t) {
+        guard processIdentifier > 0 else { return }
+        queue.async {
+            var status: Int32 = 0
+            while waitpid(processIdentifier, &status, 0) < 0 {
+                if errno != EINTR { return }
+            }
+        }
+    }
+}
+
 /// forkpty로 유저 셸을 스폰하고 마스터 fd 입출력을 중계한다.
 final class PTYProcess {
     var onOutput: ((Data) -> Void)?
@@ -218,7 +239,11 @@ final class PTYProcess {
     deinit {
         // fd는 readSource의 cancel handler가 닫는다 — 여기서 직접 close하지 않는다.
         // writeSource도 그 cancel handler 안에서 함께 정리되므로 별도로 취소할 필요가 없다.
-        if pid > 0, isRunning { kill(pid, SIGHUP) }
+        if pid > 0, isRunning {
+            let child = pid
+            kill(child, SIGHUP)
+            PTYChildReaper.reap(child)
+        }
         readSource?.cancel()
         exitSource?.cancel()
     }

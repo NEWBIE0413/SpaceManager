@@ -2,6 +2,57 @@ import XCTest
 @testable import SpaceManager
 
 final class PTYProcessTests: XCTestCase {
+    func testReleasedPTYReapsStoppedChild() throws {
+        var pty: PTYProcess? = PTYProcess()
+        try pty?.start(
+            executable: "/bin/cat", execName: "cat", arguments: [],
+            environment: ["TERM": "xterm-256color"],
+            workingDirectory: NSHomeDirectory(), cols: 80, rows: 24
+        )
+        let child = try XCTUnwrap(pty?.processIdentifier)
+        var cleanupStatus: Int32 = 0
+        defer {
+            if kill(child, 0) == 0 {
+                _ = kill(child, SIGCONT)
+                _ = kill(child, SIGKILL)
+                _ = waitpid(child, &cleanupStatus, 0)
+            }
+        }
+
+        // 종료보다 객체 해제가 반드시 앞서도록 자식을 멈춘다. 이 순서를 고정하지
+        // 않으면 기존 exitSource가 먼저 회수해 회귀가 확률적으로만 드러난다.
+        XCTAssertEqual(kill(child, SIGSTOP), 0)
+        var stoppedStatus: Int32 = 0
+        let stopDeadline = Date().addingTimeInterval(1)
+        var stopResult: pid_t = 0
+        while Date() < stopDeadline, stopResult == 0 {
+            stopResult = waitpid(child, &stoppedStatus, WUNTRACED | WNOHANG)
+            if stopResult == 0 { usleep(5_000) }
+        }
+        XCTAssertEqual(stopResult, child)
+
+        weak var releasedPTY: PTYProcess?
+        releasedPTY = pty
+        pty?.terminate(force: true)
+        pty = nil
+        XCTAssertNil(releasedPTY)
+        XCTAssertEqual(kill(child, SIGCONT), 0)
+
+        let reapDeadline = Date().addingTimeInterval(2)
+        while Date() < reapDeadline {
+            errno = 0
+            if kill(child, 0) == -1, errno == ESRCH { break }
+            usleep(10_000)
+        }
+
+        var status: Int32 = 0
+        errno = 0
+        let waited = waitpid(child, &status, WNOHANG)
+        let waitError = errno
+        XCTAssertEqual(waited, -1, "child was left waitable (usually a zombie)")
+        XCTAssertEqual(waitError, ECHILD)
+    }
+
     func testEchoProducesOutputAndExits() throws {
         let pty = PTYProcess()
         let gotOutput = expectation(description: "output")
