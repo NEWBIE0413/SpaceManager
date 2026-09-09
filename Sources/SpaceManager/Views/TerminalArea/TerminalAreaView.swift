@@ -37,7 +37,6 @@ struct SingleTerminalView: View {
     var body: some View {
         if let session = appState.selectedSession {
             SessionContentView(session: session)
-                .id(session.id)
         } else if appState.windowKind == .quick {
             QuickHomeView()
         } else {

@@ -7,9 +7,15 @@ struct ContentView: View {
     private let windowKind: WindowKind
     @Binding private var sceneWindowStateId: UUID?
     @StateObject private var appState: AppState
-    @ObservedObject private var activityScanner = RecentActivityScanner.shared
+    // The island and sidebar observe their own data. Activity updates must not
+    // invalidate the entire window and refocus/re-layout its terminal.
+    private let activityScanner = RecentActivityScanner.shared
     @StateObject private var islandHover = IslandHoverState()
+    @StateObject private var terminalLayout = TerminalLayoutTransition()
+    @SceneStorage("workspaceSidebarCompact") private var isSidebarCompact = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismiss) private var dismiss
 
     init(windowKind: WindowKind = .workspace, windowStateId: Binding<UUID?> = .constant(nil)) {
         self.windowKind = windowKind
@@ -47,25 +53,34 @@ struct ContentView: View {
         return appState.selectedWorkspace?.name ?? "SpaceManager"
     }
 
+    private var sidebarBinding: Binding<Bool> {
+        Binding(get: { isSidebarCompact }, set: { compact in
+            guard compact != isSidebarCompact else { return }
+            // Suspend the native viewport before SwiftUI starts laying out either
+            // panel. Interrupted animations may complete after the next toggle.
+            let transition = terminalLayout.begin()
+            withAnimation(reduceMotion ? nil : Sidebar.collapseAnimation, completionCriteria: .removed) {
+                isSidebarCompact = compact
+            } completion: {
+                terminalLayout.finish(transition)
+            }
+        })
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
-            // 캔버스는 합성 비용 없는 불투명 단색. behind-window 유리는
-            // 정보 위계를 만드는 사이드바 한 겹에만 남긴다.
-            Color(nsColor: GlassSurfacePolicy.canvasColor(
-                for: windowKind,
-                isDark: isDarkNow
-            ))
+            WorkspaceCanvasSurface(windowKind: windowKind, isDark: isDarkNow)
                 .ignoresSafeArea()
             
-            HStack(spacing: 12) {
+            HStack(alignment: .top, spacing: windowKind == .workspace ? 10 : 12) {
                 Group {
                     if windowKind == .quick {
                         QuickSidebarView()
                     } else {
-                        SidebarView()
+                        SidebarView(isCompact: sidebarBinding)
                     }
                 }
-                    .frame(width: 240)
+                    .frame(width: windowKind == .workspace && isSidebarCompact ? Sidebar.compactWidth : Sidebar.expandedWidth)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 
                 TerminalAreaView()
@@ -76,28 +91,27 @@ struct ContentView: View {
                                 .stroke(Color.white.opacity(0.07), lineWidth: 1)
                         }
                     }
-                    .shadow(color: Color.black.opacity(isDarkNow ? 0.3 : 0.1), radius: 8, x: 0, y: 4)
+                    .background {
+                        // Shadow the card shape, not WebKit's changing pixels.
+                        // This avoids offscreen compositing of the terminal on
+                        // every frame of the shared panel animation.
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color(nsColor: GlassSurfacePolicy.terminalCardColor(for: windowKind)))
+                            .shadow(color: Color.black.opacity(isDarkNow ? 0.3 : 0.1), radius: 8, x: 0, y: 4)
+                    }
             }
-            // 캔버스 인셋: 신호등(Traffic Lights) 겹침 방지 및 테두리 여백
-            .padding(.horizontal, 12)
-            .padding(.bottom, 12)
-            .padding(.top, 36)
-            
-            // 확장 패널 (아일랜드) - 상단 중앙에 직접 배치
-            if windowKind == .workspace {
-                VStack(spacing: 8) {
-                    IslandPillView(scanner: activityScanner, hover: islandHover)
-                        // full-size content의 실제 창 상단 기준. 30pt pill 중심이
-                        // 신호등 중심선과 맞고, 아래 패널은 pill 다음에 자연히 열린다.
-                        .padding(.top, 6)
+            .padding(windowKind == .workspace ? 8 : 12)
 
-                    IslandPanelView(scanner: activityScanner, hover: islandHover)
-                }
+            // A separate top layer stays above the native terminal during layout
+            // changes, centered on the whole window without reserving height.
+            if windowKind == .workspace {
+                FloatingActivityIsland(scanner: activityScanner, hover: islandHover, appState: appState)
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .zIndex(1)
             }
         }
-        // hiddenTitleBar도 SwiftUI 컨테이너에는 기존 타이틀바 safe area를 남긴다.
-        // 캔버스 좌표계를 창 프레임 상단까지 확장하고, 신호등과 카드의 간격은
-        // 위 HStack의 명시적 36pt inset 하나로만 관리한다.
+        // Extend both panels into the titlebar; only the narrow outer frame remains.
         .ignoresSafeArea(.container, edges: .top)
         .background {
             WindowBindingView(
@@ -109,6 +123,7 @@ struct ContentView: View {
                 .frame(width: 0, height: 0)
         }
         .environmentObject(appState)
+        .environmentObject(terminalLayout)
         .focusedSceneObject(appState)
         .preferredColorScheme(preferredScheme)
         .onChange(of: appState.preferredAppearance) {
@@ -126,13 +141,24 @@ struct ContentView: View {
                 .environmentObject(appState)
         }
         .onAppear {
+            if appState.shouldCloseOnAppearance {
+                dismiss()
+                return
+            }
             // WindowGroup scene value는 macOS가 창별로 복원한다. 최초/레거시 nil scene에는
             // 실제 claim 결과를 기록해 다음 실행부터 같은 WindowState.id를 돌려받는다.
             if sceneWindowStateId == nil {
                 sceneWindowStateId = appState.windowStateId
             }
-            RecentActivityScanner.shared.start()
+            if windowKind == .workspace {
+                RecentActivityScanner.shared.start(owner: appState.windowStateId)
+            }
             WindowRestorer.openRemainingWindowsIfNeeded(openWindow)
+        }
+        .onDisappear {
+            if windowKind == .workspace, !appState.shouldCloseOnAppearance {
+                RecentActivityScanner.shared.stop(owner: appState.windowStateId)
+            }
         }
     }
 }

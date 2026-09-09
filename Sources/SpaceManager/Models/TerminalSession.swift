@@ -30,6 +30,7 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     private var quickSessionId: String?
     private var quickIdentityTimer: Timer?
     private var quickTitleCancellable: AnyCancellable?
+    private var isTrackingQuickTitle = false
 
     init(id: UUID = UUID(), kind: TabKind, name: String,
          workingDirectory: String, tmuxSessionName: String? = nil,
@@ -128,6 +129,8 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
 
     private func beginQuickTitleUpdates(processIdentifier: pid_t) {
         let scanner = QuickConversationScanner.shared
+        if isTrackingQuickTitle { scanner.untrack(owner: id) }
+        isTrackingQuickTitle = false
         if quickLaunch?.resumeSessionId == nil {
             quickSessionId = nil
             name = initialName
@@ -138,6 +141,7 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
                 self?.updateQuickTitle(titlesBySessionId: titles)
             }
         scanner.start()
+        trackQuickTitle()
         scanner.rescan()
 
         guard quickSessionId == nil else { return }
@@ -166,10 +170,17 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
                 processIdentifier: processIdentifier
               ) else { return }
         quickSessionId = sessionId
+        trackQuickTitle()
         updateQuickTitle(
             titlesBySessionId: QuickConversationScanner.shared.aiTitlesBySessionId
         )
         QuickConversationScanner.shared.rescan()
+    }
+
+    private func trackQuickTitle() {
+        guard let quickSessionId else { return }
+        QuickConversationScanner.shared.track(sessionID: quickSessionId, owner: id)
+        isTrackingQuickTitle = true
     }
 
     func updateQuickTitle(titlesBySessionId: [String: String]) {
@@ -208,6 +219,8 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     }
 
     func cleanup(force: Bool = false) {
+        if isTrackingQuickTitle { QuickConversationScanner.shared.untrack(owner: id) }
+        isTrackingQuickTitle = false
         quickIdentityTimer?.invalidate()
         quickIdentityTimer = nil
         quickTitleCancellable = nil
@@ -215,6 +228,11 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
         pty = nil
         terminalView?.removeFromSuperview()
         terminalView = nil
+    }
+
+    deinit {
+        quickIdentityTimer?.invalidate()
+        if isTrackingQuickTitle { QuickConversationScanner.shared.untrack(owner: id) }
     }
 
     static func == (lhs: TerminalSession, rhs: TerminalSession) -> Bool {

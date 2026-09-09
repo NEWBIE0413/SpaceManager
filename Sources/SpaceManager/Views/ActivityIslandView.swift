@@ -1,13 +1,57 @@
 import SwiftUI
+import AppKit
+
+/// Give the island its own native compositing surface above WebKit. A plain
+/// SwiftUI overlay can be covered by WebKit's redraw after the terminal resizes.
+struct FloatingActivityIsland: NSViewRepresentable {
+    let scanner: RecentActivityScanner
+    let hover: IslandHoverState
+    let appState: AppState
+
+    func makeNSView(context: Context) -> NSHostingView<IslandContents> {
+        let view = NSHostingView(rootView: contents)
+        view.wantsLayer = true
+        view.layer?.zPosition = 1
+        view.sizingOptions = [.intrinsicContentSize]
+        return view
+    }
+
+    func updateNSView(_ view: NSHostingView<IslandContents>, context: Context) {
+        view.rootView = contents
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSHostingView<IslandContents>, context: Context) -> CGSize? {
+        nsView.fittingSize
+    }
+
+    private var contents: IslandContents {
+        IslandContents(scanner: scanner, hover: hover, appState: appState)
+    }
+}
+
+struct IslandContents: View {
+    let scanner: RecentActivityScanner
+    let hover: IslandHoverState
+    let appState: AppState
+
+    var body: some View {
+        VStack(spacing: 6) {
+            IslandPillView(scanner: scanner, hover: hover)
+            IslandPanelView(scanner: scanner, hover: hover)
+        }
+        .fixedSize()
+        .environmentObject(appState)
+    }
+}
 
 /// 타이틀바의 다이내믹 아일랜드 — 최근 1시간 내 대화가 오간 Claude 세션들.
 ///
 /// 목적은 상황 인지다: "아 내가 지금 이 작업들을 돌리고 있었지"가 한눈에 들어오게.
-/// 접힌 필은 타이틀바 중앙(노치 자리)에 상주하고, 호버하면 타이틀바 아래로 패널이
+/// 접힌 필은 작업영역 위에 떠 있고, 호버하면 그 아래로 패널이
 /// 내려온다. 활동이 없으면 필 자체가 사라진다 — 빈 껍데기가 떠 있으면 정보가
 /// 아니라 장식이 된다.
 ///
-/// 필(툴바)과 패널(오버레이)은 다른 뷰 계층에 살기 때문에, 호버 상태를
+/// 필과 패널 사이에서도 호버 상태가 이어지도록
 /// IslandHoverState 하나로 모아 "필이나 패널 어느 쪽에라도 포인터가 있으면 펼침,
 /// 둘 다 떠나면 잠깐의 유예 후 접힘"으로 판정한다 — 필→패널로 포인터가 건너가는
 /// 사이에 접혀버리는 깜빡임을 막는 유예다.
@@ -31,33 +75,24 @@ final class IslandHoverState: ObservableObject {
     }
 }
 
-/// 타이틀바 중앙에 상주하는 접힌 Dynamic Island pill
+/// 작업영역 상단에 겹쳐 뜨는 Dynamic Island pill
 struct IslandPillView: View {
     @ObservedObject var scanner: RecentActivityScanner
     @ObservedObject var hover: IslandHoverState
-    @State private var pulse = false
 
     var body: some View {
         Group {
             if !scanner.sessions.isEmpty {
-                HStack(spacing: 7) {
-                    Circle()
-                        .fill(Color.warmPink)
-                        .frame(width: 6, height: 6)
-                        .opacity(pulse ? 0.35 : 1)
-                        .animation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true), value: pulse)
-                        .onAppear { pulse = true }
-
-                    Text(compactLabel)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.85))
-                        .lineLimit(1)
-                }
+                Text(compactLabel)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.85))
+                    .lineLimit(1)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .frame(minHeight: 30)
-                .background(Color.black)
+                .background(Color(red: 0.045, green: 0.052, blue: 0.064))
                 .clipShape(Capsule(style: .continuous))
+                .shadow(color: Color.black.opacity(0.45), radius: 10, x: 0, y: 4)
                 .onHover { hovering in
                     hover.setPill(hovering)
                     if hovering { scanner.rescan() }
@@ -78,7 +113,7 @@ struct IslandPillView: View {
     }
 }
 
-/// 필 호버 시 타이틀바 아래로 내려오는 확장 패널 (창 콘텐츠 상단 중앙 오버레이)
+/// 필 아래로 내려오는 확장 패널. 작업영역의 크기를 바꾸지 않는 오버레이.
 struct IslandPanelView: View {
     @EnvironmentObject var appState: AppState
     @ObservedObject var scanner: RecentActivityScanner
@@ -119,8 +154,9 @@ struct IslandPanelView: View {
                     Spacer().frame(height: 8)
                 }
                 .frame(width: 340)
-                .background(Color.black)
+                .background(Color(red: 0.045, green: 0.052, blue: 0.064))
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .shadow(color: Color.black.opacity(0.45), radius: 18, x: 0, y: 8)
                 .onHover { hover.setPanel($0) }
                 .transition(.scale(scale: 0.9, anchor: .top).combined(with: .opacity))
             }

@@ -16,7 +16,31 @@ struct AgentActivityRecord: Equatable {
 }
 
 enum AgentActivitySources {
+    struct HistoryEntry {
+        let cwd: String
+        let date: Date
+        let snippet: String?
+    }
+
+    struct Cache {
+        var codex = FileMetadataCache<AgentActivityRecord>()
+        var history = FileMetadataCache<[String: HistoryEntry]>()
+        var transcriptDates = FileMetadataCache<Date>()
+        var projects = FileMetadataCache<[String: String]>()
+        var classic = FileMetadataCache<AgentActivityRecord>()
+        var loadCount: Int {
+            codex.loadCount + history.loadCount + transcriptDates.loadCount + projects.loadCount + classic.loadCount
+        }
+    }
+
     static func scanCodex(sessionsDir: URL, now: Date = Date()) -> [AgentActivityRecord] {
+        var cache = Cache()
+        return scanCodex(sessionsDir: sessionsDir, cache: &cache, now: now)
+    }
+
+    static func scanCodex(sessionsDir: URL, cache: inout Cache, now: Date = Date()) -> [AgentActivityRecord] {
+        cache.codex.beginPass()
+        defer { cache.codex.endPass() }
         let cutoff = now.addingTimeInterval(-RecentActivityScanner.dotWindow)
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
@@ -31,7 +55,7 @@ enum AgentActivitySources {
                   values.isRegularFile == true,
                   let mtime = values.contentModificationDate,
                   mtime > cutoff,
-                  let record = parseCodex(file: file),
+                  let record = cache.codex.value(for: file, load: { parseCodex(file: file) }),
                   record.lastActivity > cutoff else { continue }
             result.append(record)
         }
@@ -39,14 +63,28 @@ enum AgentActivitySources {
     }
 
     static func scanGemini(geminiDir: URL, now: Date = Date()) -> [AgentActivityRecord] {
-        var records = scanAntigravity(geminiDir: geminiDir, now: now)
-        records.append(contentsOf: scanClassicGemini(geminiDir: geminiDir, now: now))
-        return records
+        var cache = Cache()
+        return scanGemini(geminiDir: geminiDir, cache: &cache, now: now)
+    }
+
+    static func scanGemini(geminiDir: URL, cache: inout Cache, now: Date = Date()) -> [AgentActivityRecord] {
+        cache.history.beginPass()
+        cache.transcriptDates.beginPass()
+        cache.projects.beginPass()
+        cache.classic.beginPass()
+        defer {
+            cache.history.endPass()
+            cache.transcriptDates.endPass()
+            cache.projects.endPass()
+            cache.classic.endPass()
+        }
+        return scanAntigravity(geminiDir: geminiDir, cache: &cache, now: now)
+            + scanClassicGemini(geminiDir: geminiDir, cache: &cache, now: now)
     }
 
     private static func parseCodex(file: URL) -> AgentActivityRecord? {
         guard let head = readPrefix(file, maxBytes: 65_536),
-              let tail = readTail(file, maxBytes: 131_072) else { return nil }
+              let tail = TranscriptJSON.tail(file) else { return nil }
 
         var cwd: String?
         var sessionID = file.deletingPathExtension().lastPathComponent
@@ -62,7 +100,7 @@ enum AgentActivitySources {
         var snippet: String?
         for object in jsonObjects(in: tail).reversed() {
             if activity == nil, let raw = object["timestamp"] as? String {
-                activity = parseTimestamp(raw)
+                activity = TranscriptJSON.timestamp(raw)
             }
             if snippet == nil { snippet = codexUserText(object) }
             if activity != nil && snippet != nil { break }
@@ -74,39 +112,43 @@ enum AgentActivitySources {
         )
     }
 
-    private static func scanAntigravity(geminiDir: URL, now: Date) -> [AgentActivityRecord] {
+    private static func scanAntigravity(geminiDir: URL, cache: inout Cache, now: Date) -> [AgentActivityRecord] {
         let root = geminiDir.appendingPathComponent("antigravity-cli")
         let history = root.appendingPathComponent("history.jsonl")
-        guard let text = readTail(history, maxBytes: 1_048_576) else { return [] }
+        guard let latest = cache.history.value(for: history, load: {
+            guard let data = TranscriptJSON.tail(history, maxBytes: 1_048_576) else { return nil }
+            var latest: [String: HistoryEntry] = [:]
+            for object in jsonObjects(in: data) {
+                guard let id = object["conversationId"] as? String,
+                      let cwd = object["workspace"] as? String,
+                      let millis = object["timestamp"] as? NSNumber else { continue }
+                let date = Date(timeIntervalSince1970: millis.doubleValue / 1000)
+                if latest[id]?.date ?? .distantPast < date {
+                    latest[id] = HistoryEntry(cwd: cwd, date: date,
+                        snippet: (object["display"] as? String).map(cleanSnippet))
+                }
+            }
+            return latest
+        }) else { return [] }
         let cutoff = now.addingTimeInterval(-RecentActivityScanner.dotWindow)
-        var latest: [String: (cwd: String, date: Date, snippet: String?)] = [:]
-        for object in jsonObjects(in: text) {
-            guard let id = object["conversationId"] as? String,
-                  let cwd = object["workspace"] as? String,
-                  let millis = object["timestamp"] as? NSNumber else { continue }
-            let date = Date(timeIntervalSince1970: millis.doubleValue / 1000)
-            guard date > cutoff else { continue }
-            let snippet = (object["display"] as? String).map(cleanSnippet)
-            if latest[id]?.date ?? .distantPast < date { latest[id] = (cwd, date, snippet) }
-        }
-
-        return latest.map { id, entry in
-            let transcript = root
-                .appendingPathComponent("brain/\(id)/.system_generated/logs/transcript.jsonl")
-            let transcriptDate = lastGeminiTranscriptDate(transcript) ?? entry.date
+        return latest.filter { $0.value.date > cutoff }.map { id, entry in
+            let transcript = root.appendingPathComponent("brain/\(id)/.system_generated/logs/transcript.jsonl")
+            let transcriptDate = cache.transcriptDates.value(for: transcript) { lastGeminiTranscriptDate(transcript) }
             return AgentActivityRecord(
                 id: "gemini:\(id)", provider: .gemini, cwd: entry.cwd,
-                lastActivity: max(entry.date, transcriptDate), snippet: entry.snippet,
+                lastActivity: max(entry.date, transcriptDate ?? entry.date), snippet: entry.snippet,
                 growingFile: FileManager.default.fileExists(atPath: transcript.path) ? transcript : nil
             )
         }
     }
 
-    private static func scanClassicGemini(geminiDir: URL, now: Date) -> [AgentActivityRecord] {
+    private static func scanClassicGemini(geminiDir: URL, cache: inout Cache, now: Date) -> [AgentActivityRecord] {
         let projectsFile = geminiDir.appendingPathComponent("projects.json")
-        guard let data = try? Data(contentsOf: projectsFile),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let projects = root["projects"] as? [String: String] else { return [] }
+        guard let projects = cache.projects.value(for: projectsFile, load: {
+            guard let data = try? Data(contentsOf: projectsFile),
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            return root["projects"] as? [String: String]
+        }) else { return [] }
         let cutoff = now.addingTimeInterval(-RecentActivityScanner.dotWindow)
         var result: [AgentActivityRecord] = []
         for (cwd, projectKey) in projects {
@@ -117,9 +159,10 @@ enum AgentActivitySources {
             for file in files where file.lastPathComponent.hasPrefix("session-") {
                 guard let mtime = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
                       mtime > cutoff,
-                      let record = parseClassicGemini(file: file, cwd: cwd, fallback: mtime),
+                      let record = cache.classic.value(for: file, load: { parseClassicGemini(file: file, cwd: cwd, fallback: mtime) }),
                       record.lastActivity > cutoff else { continue }
-                result.append(record)
+                result.append(AgentActivityRecord(id: record.id, provider: .gemini, cwd: cwd,
+                    lastActivity: record.lastActivity, snippet: record.snippet, growingFile: file))
             }
         }
         return result
@@ -132,14 +175,14 @@ enum AgentActivitySources {
         var snippet: String?
         if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             id = object["sessionId"] as? String ?? id
-            if let raw = object["lastUpdated"] as? String, let parsed = parseTimestamp(raw) { activity = parsed }
+            if let raw = object["lastUpdated"] as? String, let parsed = TranscriptJSON.timestamp(raw) { activity = parsed }
             if let messages = object["messages"] as? [[String: Any]] {
                 snippet = messages.reversed().compactMap(geminiUserText).first
             }
-        } else if let text = String(data: data, encoding: .utf8) {
-            for object in jsonObjects(in: text).reversed() {
+        } else {
+            for object in jsonObjects(in: data).reversed() {
                 if let raw = (object["timestamp"] ?? (object["$set"] as? [String: Any])?["lastUpdated"]) as? String,
-                   let parsed = parseTimestamp(raw), parsed > activity { activity = parsed }
+                   let parsed = TranscriptJSON.timestamp(raw), parsed > activity { activity = parsed }
                 if snippet == nil { snippet = geminiUserText(object) }
             }
         }
@@ -150,9 +193,9 @@ enum AgentActivitySources {
     }
 
     private static func lastGeminiTranscriptDate(_ file: URL) -> Date? {
-        guard let text = readTail(file, maxBytes: 131_072) else { return nil }
+        guard let text = TranscriptJSON.tail(file) else { return nil }
         for object in jsonObjects(in: text).reversed() {
-            if let raw = object["created_at"] as? String, let date = parseTimestamp(raw) { return date }
+            if let raw = object["created_at"] as? String, let date = TranscriptJSON.timestamp(raw) { return date }
         }
         return nil
     }
@@ -177,31 +220,13 @@ enum AgentActivitySources {
             .replacingOccurrences(of: "\n", with: " ").prefix(240))
     }
 
-    private static func jsonObjects(in text: String) -> [[String: Any]] {
-        text.split(separator: "\n").compactMap {
-            try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
-        }
+    private static func jsonObjects(in data: Data) -> [[String: Any]] {
+        data.split(separator: 10).compactMap { TranscriptJSON.object(Data($0)) }
     }
 
-    private static func readPrefix(_ file: URL, maxBytes: Int) -> String? {
+    private static func readPrefix(_ file: URL, maxBytes: Int) -> Data? {
         guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
         defer { try? handle.close() }
-        guard let data = try? handle.read(upToCount: maxBytes) else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    private static func readTail(_ file: URL, maxBytes: UInt64) -> String? {
-        guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
-        defer { try? handle.close() }
-        let size = (try? handle.seekToEnd()) ?? 0
-        try? handle.seek(toOffset: size - min(size, maxBytes))
-        guard let data = try? handle.readToEnd() else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    private static func parseTimestamp(_ raw: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
+        return try? handle.read(upToCount: maxBytes)
     }
 }

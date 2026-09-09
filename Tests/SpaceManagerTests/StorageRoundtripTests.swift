@@ -106,4 +106,23 @@ final class StorageRoundtripTests: XCTestCase {
         XCTAssertEqual(decoded.resolvedKind, .quick)
         XCTAssertEqual(decoded.appearance, "light")
     }
+
+    func testExplicitlyEmptyWorkspaceStateIsNotRestored() {
+        let empty = WindowState(
+            id: UUID(),
+            kind: .workspace,
+            selectedWorkspaceId: nil,
+            workspaces: [],
+            workspaceTabs: []
+        )
+        let legacy = WindowState(
+            id: UUID(),
+            kind: .workspace,
+            selectedWorkspaceId: nil,
+            workspaces: nil,
+            workspaceTabs: []
+        )
+        XCTAssertTrue(WorkspaceStorage.isDiscardableEmptyWorkspaceState(empty))
+        XCTAssertFalse(WorkspaceStorage.isDiscardableEmptyWorkspaceState(legacy))
+    }
 }

@@ -20,9 +20,9 @@ struct RecentAgentSession: Identifiable, Equatable {
 /// - 아일랜드: 지난 1시간, 상위 8개, 스니펫 포함
 /// - 사이드바 활동 점: 지난 24시간, cwd별 마지막 대화 시각 (진하기 계산용)
 ///
-/// 생성 중 신호는 별도의 빠른 경로가 맡는다. 전체 디렉토리 탐색은 30초마다 하되,
-/// 거기서 찾은 24시간 내 transcript만 2초마다 stat한다. 최근 4초 안에 mtime이
-/// 갱신된 cwd를 "모델이 지금 응답을 생성 중"으로 본다.
+/// 파일 변경은 FSEvents로 감지하고 알려진 변경 파일만 stat한다. 생성 표시의
+/// 만료는 메모리상의 mtime과 단발 타이머로 처리한다. 30초 재탐색은 유실된 이벤트와
+/// 새 기록을 보정하며, 바뀌지 않은 파일의 파싱 결과는 재사용한다.
 final class RecentActivityScanner: ObservableObject {
     /// 모든 창이 같은 데이터를 보므로 하나만 돈다
     static let shared = RecentActivityScanner()
@@ -39,9 +39,7 @@ final class RecentActivityScanner: ObservableObject {
     static let dotWindow: TimeInterval = 86400
     /// 아일랜드가 소음이 되지 않도록 표시 개수 제한
     static let maxSessions = 8
-    /// 알려진 transcript만 stat하는 빠른 폴 간격
-    static let generatingPollInterval: TimeInterval = 2
-    /// 마지막 append 이후 이 시간 동안 생성 중으로 본다. 폴 간격을 합쳐 최대 약 6초 내 해제.
+    /// 마지막 append 이후 이 시간 동안 생성 중으로 본다.
     static let generatingWindow: TimeInterval = 4
 
     struct TrackedTranscript: Equatable {
@@ -59,12 +57,27 @@ final class RecentActivityScanner: ObservableObject {
     private let codexSessionsDir: URL
     private let geminiDir: URL
     private var discoveryTimer: Timer?
-    private var generatingTimer: Timer?
+    private var expirationTimer: Timer?
+    private let watcher = DirectoryWatcher()
+    private let visibilityID = UUID()
+    private var started = false
+    private var windowOwners = Set<UUID>()
+    var isStarted: Bool { started }
+    private(set) var isVisible = false
+    private(set) var isScanning = false
+    private var rescanPending = false
+    private var discoveryScheduled: DispatchWorkItem?
+    private var unresolvedPaths = Set<String>()
+    private var trackedByPath: [String: TrackedTranscript] = [:]
+    private var generatingIndex = GeneratingActivityIndex()
+    private var visibilityGeneration = 0
+    private(set) var fileStatCount = 0
+    private(set) var metadataLoadCount = 0
+    private var tailCache = FileMetadataCache<Tail>()
+    private var sourceCache = AgentActivitySources.Cache()
     private let queue = DispatchQueue(label: "SpaceManager.RecentActivity", qos: .utility)
     /// transcript 파일의 cwd는 불변이므로 한 번 읽으면 캐시한다 (queue 위에서만 접근)
     private var cwdCache: [String: String] = [:]
-    /// 최근 전체 탐색에서 찾은 24시간 내 transcript (queue 위에서만 접근)
-    private var trackedTranscripts: [TrackedTranscript] = []
 
     init(
         projectsDir: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects"),
@@ -77,62 +90,164 @@ final class RecentActivityScanner: ObservableObject {
     }
 
     func start() {
-        guard discoveryTimer == nil, generatingTimer == nil else { return }
-        rescan()
-        discoveryTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            self?.rescan()
-        }
-        generatingTimer = Timer.scheduledTimer(withTimeInterval: Self.generatingPollInterval, repeats: true) { [weak self] _ in
-            self?.pollGeneratingDirectories()
-        }
+        guard !started else { return }
+        started = true
+        AppResourcePolicy.shared.observe(visibilityID) { [weak self] in self?.setVisible($0) }
     }
 
     func stop() {
+        started = false
+        AppResourcePolicy.shared.removeObserver(visibilityID)
+        setVisible(false)
+    }
+
+    func start(owner: UUID) {
+        windowOwners.insert(owner)
+        start()
+    }
+
+    func stop(owner: UUID) {
+        windowOwners.remove(owner)
+        if windowOwners.isEmpty { stop() }
+    }
+
+    func setVisible(_ visible: Bool) {
+        isVisible = visible
+        visibilityGeneration += 1
         discoveryTimer?.invalidate()
         discoveryTimer = nil
-        generatingTimer?.invalidate()
-        generatingTimer = nil
+        expirationTimer?.invalidate()
+        expirationTimer = nil
+        discoveryScheduled?.cancel()
+        discoveryScheduled = nil
+        rescanPending = false
+        watcher.stop()
+        guard visible else { return }
+        startWatcher()
+        rescan()
+        discoveryTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.unresolvedPaths.removeAll(keepingCapacity: true)
+            self.startWatcher()
+            self.rescan()
+        }
+        discoveryTimer?.tolerance = 5
+    }
+
+    private func startWatcher() {
+        watcher.onPathsChange = { [weak self] paths, fullRescan in
+            self?.filesChanged(paths, fullRescan: fullRescan)
+        }
+        watcher.start(paths: [projectsDir.path, codexSessionsDir.path, geminiDir.path])
     }
 
     func rescan() {
-        let dir = projectsDir
-        let codexDir = codexSessionsDir
-        let geminiRoot = geminiDir
+        guard !isScanning else { rescanPending = true; return }
+        isScanning = true
+        let generation = visibilityGeneration
         queue.async { [weak self] in
             guard let self else { return }
-            var result = Self.scan(projectsDir: dir, cwdCache: &self.cwdCache)
-            let records = AgentActivitySources.scanCodex(sessionsDir: codexDir)
-                + AgentActivitySources.scanGemini(geminiDir: geminiRoot)
+            var result = Self.scan(projectsDir: self.projectsDir, cwdCache: &self.cwdCache, tailCache: &self.tailCache)
+            let records = AgentActivitySources.scanCodex(sessionsDir: self.codexSessionsDir, cache: &self.sourceCache)
+                + AgentActivitySources.scanGemini(geminiDir: self.geminiDir, cache: &self.sourceCache)
             Self.merge(records: records, into: &result)
-            self.trackedTranscripts = result.trackedTranscripts
-            let generating = Self.findGeneratingDirectories(in: result.trackedTranscripts)
-            DispatchQueue.main.async {
-                if self.sessions != result.sessions { self.sessions = result.sessions }
-                if self.workspaceActivity != result.activityByCwd { self.workspaceActivity = result.activityByCwd }
-                if self.generatingDirectories != generating { self.generatingDirectories = generating }
+            var index = GeneratingActivityIndex()
+            var tracked: [String: TrackedTranscript] = [:]
+            for transcript in result.trackedTranscripts {
+                let path = transcript.url.resolvingSymlinksInPath().path
+                tracked[path] = transcript
+                if let signature = FileSignature.read(transcript.url) {
+                    index.entries[path] = .init(cwd: transcript.cwd, modified: signature.modified)
+                }
             }
-        }
-    }
-
-    private func pollGeneratingDirectories() {
-        queue.async { [weak self] in
-            guard let self else { return }
-            let generating = Self.findGeneratingDirectories(in: self.trackedTranscripts)
+            let loads = self.tailCache.loadCount + self.sourceCache.loadCount
             DispatchQueue.main.async {
-                if self.generatingDirectories != generating {
-                    self.generatingDirectories = generating
+                self.isScanning = false
+                if generation == self.visibilityGeneration {
+                    if self.sessions != result.sessions { self.sessions = result.sessions }
+                    if self.workspaceActivity != result.activityByCwd { self.workspaceActivity = result.activityByCwd }
+                    self.trackedByPath = tracked
+                    self.generatingIndex = index
+                    self.fileStatCount += result.trackedTranscripts.count
+                    self.metadataLoadCount = loads
+                    self.publishGenerating()
+                }
+                if self.rescanPending {
+                    self.rescanPending = false
+                    self.rescan()
                 }
             }
         }
     }
 
+    func filesChanged(_ paths: Set<String>, fullRescan: Bool = false) {
+        guard isVisible else { return }
+        if fullRescan { startWatcher(); scheduleDiscovery() }
+        let normalized = Set(paths.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path })
+        let changed = normalized.compactMap { path in trackedByPath[path].map { (path, $0) } }
+        // Unknown/new transcripts get one early discovery. A record that has not
+        // written its identity yet is retried by the 30-second reconciliation.
+        var foundNewPath = false
+        for path in normalized where trackedByPath[path] == nil && (path.hasSuffix(".jsonl") || path.hasSuffix(".json")) {
+            if unresolvedPaths.insert(path).inserted { foundNewPath = true }
+        }
+        if foundNewPath { scheduleDiscovery() }
+        guard !changed.isEmpty else { return }
+        let generation = visibilityGeneration
+        queue.async { [weak self] in
+            let updates = changed.map { path, transcript in
+                (path, transcript.cwd, FileSignature.read(transcript.url)?.modified)
+            }
+            DispatchQueue.main.async {
+                guard let self, self.isVisible, self.visibilityGeneration == generation else { return }
+                self.fileStatCount += updates.count
+                for (path, cwd, modified) in updates {
+                    self.generatingIndex.entries[path] = modified.map { .init(cwd: cwd, modified: $0) }
+                }
+                self.publishGenerating()
+            }
+        }
+    }
+
+    private func scheduleDiscovery() {
+        guard discoveryScheduled == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.discoveryScheduled = nil
+            if self.isVisible { self.rescan() }
+        }
+        discoveryScheduled = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+    }
+
+    private func publishGenerating() {
+        let now = Date()
+        let generating = generatingIndex.directories(now: now)
+        if generatingDirectories != generating { generatingDirectories = generating }
+        expirationTimer?.invalidate()
+        expirationTimer = nil
+        guard isVisible, let expiration = generatingIndex.nextExpiration(now: now) else { return }
+        expirationTimer = Timer.scheduledTimer(withTimeInterval: max(0.01, expiration.timeIntervalSince(now) + 0.01),
+            repeats: false) { [weak self] _ in self?.publishGenerating() }
+    }
+
     // MARK: - 스캔
 
+    typealias Tail = (cwd: String?, snippet: String?, lastActivity: Date?)
+
     static func scan(projectsDir: URL, cwdCache: inout [String: String], now: Date = Date()) -> ScanResult {
+        var tailCache = FileMetadataCache<Tail>()
+        return scan(projectsDir: projectsDir, cwdCache: &cwdCache, tailCache: &tailCache, now: now)
+    }
+
+    static func scan(projectsDir: URL, cwdCache: inout [String: String],
+                     tailCache: inout FileMetadataCache<Tail>, now: Date = Date()) -> ScanResult {
+        tailCache.beginPass()
+        defer { tailCache.endPass() }
         let fm = FileManager.default
         guard let projectDirs = try? fm.contentsOfDirectory(
             at: projectsDir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
-        ) else { return ScanResult() }
+        ) else { cwdCache.removeAll(); return ScanResult() }
 
         var candidates: [(url: URL, mtime: Date)] = []
         let dotCutoff = now.addingTimeInterval(-dotWindow)
@@ -154,7 +269,7 @@ final class RecentActivityScanner: ObservableObject {
         // transcript 내부 마지막 이벤트 timestamp로 판정한다. timestamp가 없는 레거시/
         // 테스트 transcript만 mtime으로 폴백한다.
         for entry in candidates {
-            let parsed = parseTail(of: entry.url)
+            let parsed = tailCache.value(for: entry.url) { parseTail(of: entry.url) } ?? (nil, nil, nil)
             let activity = parsed.lastActivity ?? entry.mtime
             guard activity > dotCutoff else { continue }
             let key = entry.url.path
@@ -166,13 +281,16 @@ final class RecentActivityScanner: ObservableObject {
             recent.append((entry.url, activity, parsed))
         }
 
-        // 1시간 창 상위 8개만 스니펫까지 파싱 (아일랜드)
+        let retained = Set(candidates.map { $0.url.path })
+        cwdCache = cwdCache.filter { retained.contains($0.key) }
+
+        // 1시간 창 상위 8개 (아일랜드)
         let islandCutoff = now.addingTimeInterval(-islandWindow)
         let top = recent.filter { $0.activity > islandCutoff }
             .sorted { $0.activity > $1.activity }
             .prefix(maxSessions)
         result.sessions = top.compactMap { entry in
-            guard let cwd = entry.parsed.cwd else { return nil }
+            guard let cwd = entry.parsed.cwd ?? cwdCache[entry.url.path] else { return nil }
             let home = FileManager.default.homeDirectoryForCurrentUser.path
             let name = cwd == home ? "~" : URL(fileURLWithPath: cwd).lastPathComponent
             return RecentAgentSession(
@@ -235,35 +353,21 @@ final class RecentActivityScanner: ObservableObject {
     /// transcript 끝부분에서 cwd와 마지막 유저 메시지를 뽑는다.
     /// 파일이 수백 MB일 수 있으므로 마지막 128KB만 읽는다 — cwd는 거의 모든 라인에 있고,
     /// 유저 텍스트도 보통 그 안에 있다. 못 찾으면 스니펫 없이 표시한다 (best-effort).
-    static func parseTail(of url: URL) -> (cwd: String?, snippet: String?, lastActivity: Date?) {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return (nil, nil, nil) }
-        defer { try? handle.close() }
-        let size = (try? handle.seekToEnd()) ?? 0
-        let readLength = min(size, 131_072)
-        try? handle.seek(toOffset: size - readLength)
-        guard let data = try? handle.readToEnd(),
-              let text = String(data: data, encoding: .utf8) else { return (nil, nil, nil) }
-
+    static func parseTail(of url: URL) -> Tail {
+        guard let data = TranscriptJSON.tail(url) else { return (nil, nil, nil) }
         var cwd: String?
         var snippet: String?
         var lastActivity: Date?
-        for line in text.split(separator: "\n").reversed() {
-            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { continue }
+        for line in data.split(separator: 10).reversed() {
+            guard let obj = TranscriptJSON.object(Data(line)) else { continue }
             if cwd == nil, let c = obj["cwd"] as? String { cwd = c }
-            if snippet == nil, let s = userText(from: obj) { snippet = s }
+            if snippet == nil, let text = userText(from: obj) { snippet = String(text.prefix(240)) }
             if lastActivity == nil, let raw = obj["timestamp"] as? String {
-                lastActivity = parseTimestamp(raw)
+                lastActivity = TranscriptJSON.timestamp(raw)
             }
             if cwd != nil && snippet != nil && lastActivity != nil { break }
         }
         return (cwd, snippet, lastActivity)
-    }
-
-    private static func parseTimestamp(_ raw: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractional.date(from: raw) { return date }
-        return ISO8601DateFormatter().date(from: raw)
     }
 
     /// 유저가 직접 친 메시지만 스니펫으로 — 도구 결과·커맨드 메타(<command-…>)·

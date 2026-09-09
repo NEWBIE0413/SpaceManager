@@ -89,6 +89,11 @@ struct QuickSidebarView: View {
                                         appState.resumeQuickConversation(sessionId: conversation.id)
                                     }
                                 )
+                                .onAppear {
+                                    if conversation.id == recentScanner.conversations.last?.id {
+                                        recentScanner.loadNextPage()
+                                    }
+                                }
                             }
                         }
                         .padding(.horizontal, 8)
@@ -100,9 +105,9 @@ struct QuickSidebarView: View {
         .frame(maxHeight: .infinity)
         .background(Color(nsColor: .controlBackgroundColor))
         .onAppear {
-            recentScanner.start()
-            recentScanner.rescan()
+            recentScanner.start(owner: appState.windowStateId)
         }
+        .onDisappear { recentScanner.stop(owner: appState.windowStateId) }
     }
 }
 

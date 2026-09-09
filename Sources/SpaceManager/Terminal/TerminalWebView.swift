@@ -90,6 +90,9 @@ final class TerminalWebView: NSView {
     private var pendingSince: CFTimeInterval?
     private var flushScheduled = false
     private var lastFlushTime: CFTimeInterval = 0
+    private var lastFittedSize: CGSize?
+    private var presentationGeneration = 0
+    private var presentationCompletion: (() -> Void)?
 
     override convenience init(frame: NSRect) {
         self.init(frame: frame, palette: .workspaceDark)
@@ -100,6 +103,10 @@ final class TerminalWebView: NSView {
         let config = WKWebViewConfiguration()
         webView = WKWebView(frame: frame, configuration: config)
         super.init(frame: frame)
+        // Keep WebKit inside a composited container so its resize redraws do not
+        // paint over SwiftUI layers floating above the terminal.
+        wantsLayer = true
+        layer?.backgroundColor = (palette == .quickLight ? NSColor.white : NSColor(white: 30.0 / 255, alpha: 1)).cgColor
 
         config.userContentController.add(BridgeProxy(owner: self), name: "bridge")
         webView.navigationDelegate = navigationProxy
@@ -126,6 +133,7 @@ final class TerminalWebView: NSView {
 
     func reloadPage() {
         isReady = false
+        lastFittedSize = nil
         loadPage()
     }
 
@@ -186,6 +194,24 @@ final class TerminalWebView: NSView {
         webView.evaluateJavaScript("window.smFocus()", completionHandler: nil)
     }
 
+    func prepareForPresentation(_ completion: @escaping () -> Void) {
+        presentationGeneration += 1
+        presentationCompletion = completion
+        requestPresentation()
+    }
+
+    func cancelPresentation() {
+        presentationGeneration += 1
+        presentationCompletion = nil
+    }
+
+    private func requestPresentation() {
+        guard isReady, presentationCompletion != nil else { return }
+        // The JS acknowledgement follows xterm's render and a compositor frame;
+        // evaluating JS successfully alone does not mean WebKit has painted.
+        webView.evaluateJavaScript("window.smPreparePresentation(\(presentationGeneration))", completionHandler: nil)
+    }
+
     override func mouseDown(with event: NSEvent) {
         focusTerminal()
         super.mouseDown(with: event)
@@ -195,9 +221,14 @@ final class TerminalWebView: NSView {
     // ResizeObserver가 초기 핏을 놓칠 수 있어, 네이티브 레이아웃 변경마다 명시적으로 핏한다
     override func layout() {
         super.layout()
-        if isReady {
-            webView.evaluateJavaScript("window.smFit && window.smFit()", completionHandler: nil)
-        }
+        fitIfNeeded()
+    }
+
+    private func fitIfNeeded() {
+        guard isReady, bounds.width > 0, bounds.height > 0,
+              lastFittedSize != bounds.size else { return }
+        lastFittedSize = bounds.size
+        webView.evaluateJavaScript("window.smFit && window.smFit()", completionHandler: nil)
     }
 
     /// 워크스페이스는 기존 다크를 유지하고, tmux를 쓰지 않는 Quick만 전체
@@ -250,18 +281,24 @@ final class TerminalWebView: NSView {
             isReady = true
             applyTheme()
             flushOutput()
-            webView.evaluateJavaScript("window.smFit && window.smFit()", completionHandler: nil)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                self?.webView.evaluateJavaScript("window.smFit && window.smFit()", completionHandler: nil)
-            }
+            fitIfNeeded()
             onReady?()
+            requestPresentation()
+        case "presented":
+            guard let generation = dict["payload"] as? Int,
+                  generation == presentationGeneration else { return }
+            let completion = presentationCompletion
+            presentationCompletion = nil
+            completion?()
         case "input":
             if let s = dict["payload"] as? String {
                 onUserInput?(Data(s.utf8))
             }
         case "resize":
             if let p = dict["payload"] as? [String: Any],
-               let cols = p["cols"] as? Int, let rows = p["rows"] as? Int {
+               let cols = p["cols"] as? Int, let rows = p["rows"] as? Int,
+               cols > 0, rows > 0, cols <= Int(UInt16.max), rows <= Int(UInt16.max),
+               cols != Int(lastCols) || rows != Int(lastRows) {
                 lastCols = UInt16(cols)
                 lastRows = UInt16(rows)
                 onResize?(UInt16(cols), UInt16(rows))

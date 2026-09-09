@@ -81,10 +81,20 @@ final class QuickModelSelectionTests: XCTestCase {
         XCTAssertEqual(models[1].supportedEfforts, [.low, .medium, .high, .xhigh, .max])
     }
 
-    func testInstalledClaudeCatalogContainsOpus5() {
-        let models = ClaudeCLIModelDiscovery.discover()
-        XCTAssertTrue(models.contains {
-            $0.id == "claude-opus-5" && $0.displayName == "Claude Opus 5"
-        })
+    func testCLIModelDiscoveryReadsExecutableStringsAndInvalidatesAfterUpgrade() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        try "claude-opus-5\nClaude Opus 5\n".write(to: file, atomically: true, encoding: .utf8)
+        let first = ClaudeCLIModelDiscovery.discover(executablePath: file.path)
+        XCTAssertEqual(first.map(\.id), ["claude-opus-5"])
+        XCTAssertEqual(ClaudeCLIModelDiscovery.discover(executablePath: file.path), first)
+        try "claude-sonnet-5\nClaude Sonnet 5\n".write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertEqual(ClaudeCLIModelDiscovery.discover(executablePath: file.path).map(\.id), ["claude-sonnet-5"])
+    }
+
+    func testEmptyAndOversizedStringTableRecordsAreSafe() {
+        XCTAssertTrue(ClaudeCLIModelDiscovery.parseStringTable("").isEmpty)
+        let large = String(repeating: "x", count: 100_000)
+        XCTAssertEqual(ClaudeCLIModelDiscovery.parseStringTable(large + "\nclaude-opus-5\nClaude Opus 5").map(\.id), ["claude-opus-5"])
     }
 }

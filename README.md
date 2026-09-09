@@ -26,9 +26,15 @@ Windows, sidebars, state, and navigation use SwiftUI and AppKit. Only the termin
 
 This keeps macOS window behavior native while retaining terminal behavior required by tmux and CLI TUIs.
 
+Workspace windows extend both panels to the top of a dark canvas, with the activity island floating above them at the center of the whole window. The sidebar button switches between the full sidebar and a compact folder rail while keeping workspace icons at the same vertical positions.
+
+The sidebar and terminal card move together with a fixed gap. The terminal viewport stays at its existing size during the transition and receives the final size once the animation ends, avoiding repeated tmux redraws. Tab switches retain the outgoing surface until the selected terminal has rendered, then fade between them.
+
 ### Activity comes from transcripts
 
-The activity dots do not poll agent processes and do not infer activity from terminal repainting. SpaceManager scans Claude, Codex, and Gemini transcript files. Recent modification time drives recency, and short-interval file stats indicate that a response is currently being written.
+The activity dots do not poll agent processes and do not infer activity from terminal repainting. SpaceManager watches Claude, Codex, and Gemini transcripts with FSEvents. Only changed, known transcripts are statted for the generating indicator; a one-shot timer expires that indicator without reopening files. A 30-second reconciliation discovers missed changes and ages out old activity, reusing parsed metadata for unchanged files. Transcript timestamps determine recency, so a batch mtime touch does not make old conversations appear new.
+
+Display scanners pause when every window is covered or minimized, reconcile when a window becomes visible, and stop when their last consumer closes. Quick history loads in batches of 30 as you scroll and reads only appended bytes after indexing a transcript. Open conversations retain title tracking even outside the loaded history page.
 
 ### The session-based window does not use tmux
 
@@ -62,12 +68,14 @@ This repository reflects a personal setup. The session-based window currently ex
 ```sh
 git clone https://github.com/NEWBIE0413/SpaceManager.git
 cd SpaceManager
-swift test
+./scripts/test-isolated.sh
 swift build -c release
 .build/release/SpaceManager
 ```
 
 SwiftPM produces the executable and its resource bundle. This repository does not currently include a general-purpose `.app` packaging script.
+
+The test wrapper gives Foundation a temporary home directory because some window-state tests instantiate the application's storage singleton. Scanner benchmarks use synthetic transcripts: `python3 scripts/benchmark-scanners.py`. See [the resource optimization measurements](docs/performance/2026-09-09-scanners.md) for the comparison and its limits.
 
 The development machine uses an existing `/Applications/WorkspaceManager.app` bundle. To refresh that bundle after a release build:
 

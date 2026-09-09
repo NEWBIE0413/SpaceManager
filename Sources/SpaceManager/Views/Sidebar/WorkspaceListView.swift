@@ -4,10 +4,11 @@ import UniformTypeIdentifiers
 /// List of workspaces in the sidebar
 struct WorkspaceListView: View {
     @EnvironmentObject var appState: AppState
+    var isCompact = false
     @ObservedObject private var activity = RecentActivityScanner.shared
-    @State private var isHoveringHeader = false
     @State private var draggingWorkspace: Workspace?
     @Namespace private var animation
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// 이 워크스페이스(루트 및 하위 경로)에서의 마지막 Claude 대화 시각
     private func lastConversation(for workspace: Workspace) -> Date? {
@@ -26,30 +27,19 @@ struct WorkspaceListView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            SidebarSectionHeader(title: "WORKSPACES") {
-                Button {
-                    appState.showNewWorkspaceSheet = true
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: Sidebar.iconSize, weight: .medium))
-                        .foregroundColor(isHoveringHeader ? .primary : .secondary.opacity(0.9))
-                }
-                .buttonStyle(.plain)
-                .frame(width: 20)
-                .help("New Workspace")
-                .onHover { isHoveringHeader = $0 }
-            }
-
             if appState.workspaces.isEmpty {
                 Text("No workspaces")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.secondary.opacity(0.9))
                     .padding(.horizontal, 16)
                     .padding(.vertical, 4)
+                    .opacity(isCompact ? 0 : 1)
+                    .accessibilityHidden(isCompact)
             } else {
                 ForEach(appState.workspaces) { workspace in
                     WorkspaceRow(
                         workspace: workspace,
+                        isCompact: isCompact,
                         isSelected: appState.selectedWorkspace?.id == workspace.id,
                         lastConversation: lastConversation(for: workspace),
                         isGenerating: isGenerating(workspace),
@@ -58,10 +48,10 @@ struct WorkspaceListView: View {
                         onAddTmuxTab: { appState.selectWorkspace(workspace); appState.addTmuxTab() }
                     )
                     .onTapGesture {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 1.0)) {
-                            appState.selectWorkspace(workspace)
-                        }
+                        appState.selectWorkspace(workspace)
                     }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction { appState.selectWorkspace(workspace) }
                     .onDrag {
                         draggingWorkspace = workspace
                         return NSItemProvider(object: workspace.id.uuidString as NSString)
@@ -118,24 +108,34 @@ struct WorkspaceListView: View {
 
                     // 선택된 워크스페이스의 탭 폴더링 — 탭이 2개 이상일 때만 하위 목록 표시
                     if appState.selectedWorkspace?.id == workspace.id && appState.sessions.count > 1 {
-                        ForEach(appState.sessions) { session in
-                            WorkspaceTabRow(
-                                session: session,
-                                isSelected: appState.selectedSession?.id == session.id,
-                                animation: animation,
-                                onSelect: { 
-                                    withAnimation(.spring(response: 0.3, dampingFraction: 1.0)) {
+                        VStack(spacing: 2) {
+                            ForEach(appState.sessions) { session in
+                                WorkspaceTabRow(
+                                    session: session,
+                                    isSelected: appState.selectedSession?.id == session.id,
+                                    animation: animation,
+                                    onSelect: {
                                         appState.selectSession(session)
-                                    }
-                                },
-                                onClose: { appState.removeSession(session) }
-                            )
+                                    },
+                                    onClose: { appState.removeSession(session) }
+                                )
+                            }
                         }
+                        // Retain these rows' height so every folder keeps its Y
+                        // position while names and subordinate tabs fade away.
+                        .frame(width: (isCompact ? Sidebar.compactWidth : Sidebar.expandedWidth) - 16)
+                        .opacity(isCompact ? 0 : 1)
+                        .clipped()
+                        .allowsHitTesting(!isCompact)
+                        .accessibilityHidden(isCompact)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
                 .padding(.horizontal, 8)
             }
         }
+        .animation(reduceMotion ? nil : Sidebar.selectionAnimation, value: appState.selectedWorkspace?.id)
+        .animation(reduceMotion ? nil : Sidebar.selectionAnimation, value: appState.selectedSession?.id)
     }
 }
 
@@ -248,7 +248,7 @@ struct WorkspaceTabRow: View {
             if isSelected {
                 RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius)
                     .fill(Color.white.opacity(0.10))
-                    .matchedGeometryEffect(id: "selection_bg", in: animation)
+                    .matchedGeometryEffect(id: "tab_selection", in: animation)
             } else if isHovering {
                 RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius)
                     .fill(Color.white.opacity(0.04))
@@ -257,6 +257,9 @@ struct WorkspaceTabRow: View {
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .onTapGesture(perform: onSelect)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(session.name)
+        .accessibilityValue(isSelected ? "Selected" : "")
     }
 }
 
@@ -289,6 +292,7 @@ private struct WorkspaceDropDelegate: DropDelegate {
 /// Single workspace row
 struct WorkspaceRow: View {
     let workspace: Workspace
+    var isCompact = false
     let isSelected: Bool
     var lastConversation: Date?
     var isGenerating: Bool = false
@@ -298,58 +302,68 @@ struct WorkspaceRow: View {
     @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 0) {
             Image(systemName: isSelected ? "folder.fill" : "folder")
                 .font(.system(size: Sidebar.iconSize, weight: .medium))
                 .foregroundColor(isSelected ? .warmPinkMuted : .secondary.opacity(0.9))
                 .frame(width: Sidebar.iconFrame)
 
-            // 경로 부제는 선택된 행에만 — 호버로 행 높이가 변하면 목록 전체가 출렁인다.
-            // 다른 행의 경로는 툴팁(.help)으로 확인.
-            VStack(alignment: .leading, spacing: 2) {
-                Text(workspace.name)
-                    .font(.system(size: 13, weight: isSelected ? .bold : .medium))
-                    .foregroundColor(isSelected ? .warmPinkMuted : .primary.opacity(0.9))
-                    .lineLimit(1)
-
-                if isSelected {
-                    Text(workspace.rootPath.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(.secondary.opacity(0.9))
+            HStack(spacing: 8) {
+                // 경로 부제는 선택된 행에만 — 호버로 행 높이가 변하면 목록 전체가 출렁인다.
+                // 다른 행의 경로는 툴팁(.help)으로 확인.
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(workspace.name)
+                        .font(.system(size: 13, weight: isSelected ? .bold : .medium))
+                        .foregroundColor(isSelected ? .warmPinkMuted : .primary.opacity(0.9))
                         .lineLimit(1)
-                        .truncationMode(.middle)
+
+                    if isSelected {
+                        Text(workspace.rootPath.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.secondary.opacity(0.9))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
                 }
-            }
 
-            Spacer(minLength: 0)
+                Spacer(minLength: 0)
 
-            WorkspaceActivityDot(lastConversation: lastConversation, isGenerating: isGenerating)
+                WorkspaceActivityDot(lastConversation: lastConversation, isGenerating: isGenerating)
 
-            // 자리를 항상 확보하고 투명도로만 나타낸다 (호버 출렁임 방지)
-            Menu {
-                Button("셸 탭") { onAddShellTab?() }
-                if TmuxBootstrap.isTmuxAvailable {
-                    Button("tmux 탭") { onAddTmuxTab?() }
+                // 자리를 항상 확보하고 투명도로만 나타낸다 (호버 출렁임 방지)
+                Menu {
+                    Button("셸 탭") { onAddShellTab?() }
+                    if TmuxBootstrap.isTmuxAvailable {
+                        Button("tmux 탭") { onAddTmuxTab?() }
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary.opacity(0.9))
                 }
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary.opacity(0.9))
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: 20)
+                .help("New Tab")
+                .opacity(isSelected || isHovering ? 1 : 0)
+                .allowsHitTesting(isSelected || isHovering)
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 20)
-            .help("New Tab")
-            .opacity(isSelected || isHovering ? 1 : 0)
-            .allowsHitTesting(isSelected || isHovering)
+            .padding(.leading, isCompact ? 0 : 8)
+            .opacity(isCompact ? 0 : 1)
+            .frame(width: isCompact ? 0 : nil)
+            .clipped()
+            .allowsHitTesting(!isCompact)
+            .accessibilityHidden(isCompact)
         }
+        .frame(height: isSelected ? 30 : 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, Sidebar.rowVerticalPadding)
         .padding(.horizontal, Sidebar.rowHorizontalPadding)
         .background {
             if isSelected {
                 RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius)
                     .fill(Color.white.opacity(0.10))
-                    .matchedGeometryEffect(id: "selection_bg", in: animation)
+                    .matchedGeometryEffect(id: "workspace_selection", in: animation)
             } else if isHovering {
                 RoundedRectangle(cornerRadius: Sidebar.rowCornerRadius)
                     .fill(Color.white.opacity(0.04))
@@ -357,6 +371,9 @@ struct WorkspaceRow: View {
         }
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
-        .help(workspace.rootPath)
+        .help("\(workspace.name)\n\(workspace.rootPath)")
+        .accessibilityElement(children: isCompact ? .ignore : .contain)
+        .accessibilityLabel(workspace.name)
+        .accessibilityValue(isSelected ? "Selected" : "")
     }
 }

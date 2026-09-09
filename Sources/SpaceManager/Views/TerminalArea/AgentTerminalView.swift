@@ -23,46 +23,180 @@ struct AgentTerminalView: View {
 
 /// 세션 소유 터미널 뷰를 SwiftUI에 안전하게 호스팅한다.
 ///
-/// makeNSView는 매번 새 컨테이너(TerminalHostView)를 반환한다 — NavigationSplitView가
-/// macOS에서 디테일 계층을 중복 인스턴스화해 유지하기 때문에, 세션의 단일 NSView를
-/// 직접 반환하면 계층들끼리 뷰를 뺏고 결국 화면 밖 계층이 가져가 공백이 된다.
-/// 대신 "윈도우에 실제로 붙어 있는" 컨테이너만 터미널 뷰를 인수(claim)한다.
+/// 선택 변경에도 컨테이너는 유지하고 캐시된 터미널만 교체한다. 화면 밖의
+/// SwiftUI 계층이 실제 창의 터미널을 빼앗지 않도록 창에 붙은 호스트만 claim한다.
 struct SessionTerminalWrapper: NSViewRepresentable {
     let session: TerminalSession
+    @EnvironmentObject private var terminalLayout: TerminalLayoutTransition
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeNSView(context: Context) -> TerminalHostView {
         let host = TerminalHostView()
-        host.terminal = session.getOrCreateTerminal()
-        host.attachIfNeeded()
+        terminalLayout.attach(host)
+        host.animatesTransitions = !reduceMotion
+        host.show(session.getOrCreateTerminal())
         return host
     }
 
     func updateNSView(_ host: TerminalHostView, context: Context) {
-        host.terminal = session.getOrCreateTerminal()
-        host.attachIfNeeded()
+        terminalLayout.attach(host)
+        host.animatesTransitions = !reduceMotion
+        let changed = host.show(session.getOrCreateTerminal())
         // 포커스는 실제 화면에 있는 계층에서만
-        if host.window != nil {
+        if changed && host.window != nil {
             session.focusTerminal()
+        }
+    }
+}
+
+/// One coordinator per window; a stale animation completion cannot release a
+/// newer transition. No timer or per-frame observation is needed.
+final class TerminalLayoutTransition: ObservableObject {
+    private weak var host: TerminalHostView?
+    private var generation = 0
+    private var isActive = false
+
+    func attach(_ host: TerminalHostView) {
+        self.host = host
+        host.setResizeDeferred(isActive)
+    }
+
+    @discardableResult
+    func begin() -> Int {
+        generation += 1
+        isActive = true
+        host?.setResizeDeferred(true)
+        return generation
+    }
+
+    func finish(_ transition: Int) {
+        guard transition == generation else { return }
+        // Even a nil (Reduce Motion) animation must commit its SwiftUI layout
+        // before the terminal receives the final size.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, transition == self.generation else { return }
+            self.isActive = false
+            self.host?.window?.contentView?.layoutSubtreeIfNeeded()
+            self.host?.setResizeDeferred(false)
         }
     }
 }
 
 /// 터미널 뷰를 담는 컨테이너. 윈도우에 붙은 컨테이너만 터미널을 소유한다.
 final class TerminalHostView: NSView {
-    weak var terminal: TerminalWebView?
+    private(set) weak var terminal: TerminalWebView?
+    var animatesTransitions = true
+    private var outgoing: TerminalWebView?
+    private var swapGeneration = 0
+    private var resizeDeferred = false
+    private var liveResize = false
+    private let preparePresentation: (TerminalWebView, @escaping () -> Void) -> Void
+
+    override var isFlipped: Bool { true }
+
+    init(frame: NSRect = .zero,
+         preparePresentation: @escaping (TerminalWebView, @escaping () -> Void) -> Void = { view, completion in
+             view.prepareForPresentation(completion)
+         }) {
+        self.preparePresentation = preparePresentation
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        autoresizesSubviews = false
+    }
+
+    required init?(coder: NSCoder) { fatalError("not supported") }
+
+    func setResizeDeferred(_ deferred: Bool) {
+        guard resizeDeferred != deferred else { return }
+        resizeDeferred = deferred
+        updateViewport()
+    }
+
+    @discardableResult
+    func show(_ next: TerminalWebView) -> Bool {
+        let changed = terminal !== next
+        if changed, window != nil, outgoing === next {
+            // A→B→A before B has painted: the visible A is already correct.
+            swapGeneration += 1
+            for view in subviews where view !== next {
+                (view as? TerminalWebView)?.cancelPresentation()
+                view.removeFromSuperview()
+            }
+            next.cancelPresentation()
+            next.layer?.removeAllAnimations()
+            next.alphaValue = 1
+            outgoing = nil
+        }
+        terminal = next
+        attachIfNeeded()
+        updateViewport()
+        return changed
+    }
 
     func attachIfNeeded() {
         guard let terminal, window != nil else { return }
         guard terminal.superview !== self else { return }
+        swapGeneration += 1
+        let generation = swapGeneration
+        // Keep at most two surfaces, including during rapid A→B→C selection.
+        // The outgoing view stays opaque until WebKit acknowledges a new frame.
+        let previous = outgoing ?? subviews.compactMap { $0 as? TerminalWebView }.first
+        for view in subviews where view !== previous {
+            (view as? TerminalWebView)?.cancelPresentation()
+            view.removeFromSuperview()
+        }
+        previous?.cancelPresentation()
+        previous?.layer?.removeAllAnimations()
+        previous?.alphaValue = 1
+        outgoing = previous
+        NSAnimationContext.beginGrouping()
+        NSAnimationContext.current.duration = 0
+        NSAnimationContext.current.allowsImplicitAnimation = false
         terminal.removeFromSuperview()
-        terminal.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(terminal)
-        NSLayoutConstraint.activate([
-            terminal.topAnchor.constraint(equalTo: topAnchor),
-            terminal.bottomAnchor.constraint(equalTo: bottomAnchor),
-            terminal.leadingAnchor.constraint(equalTo: leadingAnchor),
-            terminal.trailingAnchor.constraint(equalTo: trailingAnchor),
-        ])
+        terminal.translatesAutoresizingMaskIntoConstraints = true
+        terminal.autoresizingMask = []
+        // A tab selected midway through a panel animation uses the held viewport
+        // too. Hidden sessions never receive intermediate sizes.
+        terminal.frame = NSRect(origin: .zero, size: resizeDeferred ? (previous?.frame.size ?? bounds.size) : bounds.size)
+        terminal.alphaValue = 1
+        addSubview(terminal, positioned: .below, relativeTo: previous)
+        terminal.layoutSubtreeIfNeeded()
+        NSAnimationContext.endGrouping()
+        preparePresentation(terminal) { [weak self, weak terminal] in
+            guard let self, let terminal,
+                  self.swapGeneration == generation, self.terminal === terminal else { return }
+            guard let previous = self.outgoing else { return }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = self.animatesTransitions ? 0.22 : 0
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                previous.animator().alphaValue = 0
+            } completionHandler: { [weak self, weak previous] in
+                guard let self, self.swapGeneration == generation else { return }
+                previous?.removeFromSuperview()
+                previous?.alphaValue = 1
+                self.outgoing = nil
+            }
+        }
+    }
+
+    private func updateViewport() {
+        guard !resizeDeferred, !liveResize, !inLiveResize,
+              bounds.width > 0, bounds.height > 0,
+              let terminal, terminal.superview === self else { return }
+        if terminal.frame != bounds {
+            terminal.frame = bounds
+            terminal.layoutSubtreeIfNeeded()
+        }
+    }
+
+    // Pointer input always belongs to the selected tab, even while the old
+    // surface covers it during the fade. The old PTY cannot receive stray clicks.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let terminal, terminal.superview === self else { return super.hitTest(point) }
+        let local = convert(point, from: superview)
+        guard bounds.contains(local) else { return nil }
+        return terminal.hitTest(local) ?? terminal
     }
 
     override func viewDidMoveToWindow() {
@@ -73,5 +207,18 @@ final class TerminalHostView: NSView {
     override func layout() {
         super.layout()
         attachIfNeeded()
+        updateViewport()
+    }
+
+    override func viewWillStartLiveResize() {
+        super.viewWillStartLiveResize()
+        liveResize = true
+    }
+
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        liveResize = false
+        // AppKit clears inLiveResize after delivering the end notification.
+        DispatchQueue.main.async { [weak self] in self?.updateViewport() }
     }
 }

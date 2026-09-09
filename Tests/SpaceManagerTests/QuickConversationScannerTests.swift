@@ -58,6 +58,41 @@ final class QuickConversationScannerTests: XCTestCase {
         XCTAssertEqual(result[0].id, resumed.deletingPathExtension().lastPathComponent)
     }
 
+    func testPagingReadsOnlyRequestedRowsAndKeepsTrackedTitleOutsidePage() throws {
+        let now = Date()
+        var files: [URL] = []
+        for i in 0..<75 {
+            files.append(try writeTranscript([
+                "{\"type\":\"ai-title\",\"aiTitle\":\"conversation \(i)\"}",
+            ], modifiedAt: now.addingTimeInterval(Double(-i))))
+        }
+        let trackedID = files[74].deletingPathExtension().lastPathComponent
+        var index = TranscriptTitleIndex()
+        let first = QuickConversationScanner.scanClaude(directory: directory, limit: 31,
+            tracked: [trackedID], index: &index)
+        XCTAssertEqual(first.rows.count, 31)
+        XCTAssertTrue(first.hasMore)
+        XCTAssertEqual(first.titles[trackedID], "conversation 74")
+        XCTAssertEqual(index.cachedFileCount, 32)
+        let bytes = index.bytesRead
+        _ = QuickConversationScanner.scanClaude(directory: directory, limit: 31,
+            tracked: [trackedID], index: &index)
+        XCTAssertEqual(index.bytesRead, bytes)
+        let next = QuickConversationScanner.scanClaude(directory: directory, limit: 61,
+            tracked: [trackedID], index: &index)
+        XCTAssertEqual(next.rows.count, 61)
+        XCTAssertEqual(Array(next.rows.prefix(31)), first.rows)
+        let all = QuickConversationScanner.scanClaude(directory: directory, limit: 100,
+            tracked: [], index: &index)
+        XCTAssertEqual(all.rows.count, 75)
+        XCTAssertFalse(all.hasMore)
+        try FileManager.default.removeItem(at: files[0])
+        let deleted = QuickConversationScanner.scanClaude(directory: directory, limit: 100,
+            tracked: [], index: &index)
+        XCTAssertEqual(deleted.rows.count, 74)
+        XCTAssertEqual(index.cachedFileCount, 74)
+    }
+
     private func writeTranscript(_ lines: [String], modifiedAt: Date) throws -> URL {
         let url = directory.appendingPathComponent("\(UUID().uuidString).jsonl")
         try (lines.joined(separator: "\n") + "\n").write(

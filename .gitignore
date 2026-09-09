@@ -26,3 +26,6 @@ SpaceManager.app/
 SpaceManager-*.dmg
 *.mov
 .build/
+
+# Local verification receipts
+.claude/ledger/

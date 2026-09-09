@@ -8,6 +8,7 @@ class AppState: ObservableObject {
 
     let windowKind: WindowKind
     let windowStateId: UUID
+    let shouldCloseOnAppearance: Bool
 
     /// NSWindow가 다시 붙을 때 적용할 일반 프레임과 표시 상태.
     private(set) var restoredWindowFrame: WindowFrameState?
@@ -40,8 +41,15 @@ class AppState: ObservableObject {
         // windowStateId(let)를 모든 분기에서 먼저 확정해야 한다 — self.storage 접근(구독 설정)은
         // 저장 프로퍼티가 전부 초기화된 뒤에만 허용되므로, claim 판단을 그보다 앞에 끝낸다.
         let sharedStorage = WorkspaceStorage.shared
+        let discardRequestedState = requestedWindowStateId.flatMap { requestedID in
+            sharedStorage.windowStates.first { $0.id == requestedID && $0.resolvedKind == windowKind }
+        }.map(WorkspaceStorage.isDiscardableEmptyWorkspaceState) ?? false
+        shouldCloseOnAppearance = discardRequestedState
+        if discardRequestedState, let requestedWindowStateId {
+            sharedStorage.removeWindowState(id: requestedWindowStateId)
+        }
         let claimed: WindowState?
-        if let requestedWindowStateId {
+        if let requestedWindowStateId, !discardRequestedState {
             claimed = sharedStorage.claimWindowState(id: requestedWindowStateId, kind: windowKind)
         } else {
             // scene value가 없던 구 버전/최초 기본 창만 순번 migration을 거친다.

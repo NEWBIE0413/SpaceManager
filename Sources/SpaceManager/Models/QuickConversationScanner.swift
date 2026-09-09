@@ -8,173 +8,192 @@ struct QuickConversation: Identifiable, Equatable {
     let transcriptURL: URL
 }
 
-/// ~/cld 전용 Claude transcript 목록. 변경된 파일만 다시 파싱하고 제목이 같은
-/// resume 파생 파일은 최신 하나로 접어 Claude Desktop식 최근 목록을 만든다.
+/// Metadata-only, demand-paged recent conversations shared by all windows.
 final class QuickConversationScanner: ObservableObject {
     static let shared = QuickConversationScanner()
-    static let refreshInterval: TimeInterval = 5
+    static let refreshInterval: TimeInterval = 30
+    static let pageSize = 30
 
     @Published private(set) var conversations: [QuickConversation] = []
     @Published private(set) var aiTitlesBySessionId: [String: String] = [:]
-
-    private struct CacheEntry {
-        let modifiedAt: Date
-        let conversation: QuickConversation?
-    }
-
-    private struct ScanResult {
-        let conversations: [QuickConversation]
-        let aiTitlesBySessionId: [String: String]
-    }
-
+    @Published private(set) var hasMore = false
+    @Published private(set) var isLoading = false
+    private(set) var metadataBytesRead = 0
+    private var requestedCount = pageSize
+    private var trackedSessions: [UUID: String] = [:]
+    private var rescanPending = false
+    private var titleIndex = TranscriptTitleIndex()
     private let transcriptsDirectory: URL
     private let queue = DispatchQueue(label: "SpaceManager.QuickConversations", qos: .utility)
-    private var cache: [String: CacheEntry] = [:]
     private var timer: Timer?
+    private let watcher = DirectoryWatcher()
+    private let visibilityID = UUID()
+    private var started = false
+    private var windowOwners = Set<UUID>()
+    var isStarted: Bool { started }
+    private var isVisible = false
+    private var refreshScheduled: DispatchWorkItem?
 
     init(transcriptsDirectory: URL = QuickConversationScanner.defaultTranscriptsDirectory()) {
         self.transcriptsDirectory = transcriptsDirectory
     }
 
-    private static func defaultTranscriptsDirectory() -> URL {
+    static func defaultTranscriptsDirectory() -> URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let quickDirectory = home.appendingPathComponent("cld", isDirectory: true)
-        let encodedProjectPath = quickDirectory.path.replacingOccurrences(of: "/", with: "-")
-        return home
-            .appendingPathComponent(".claude/projects", isDirectory: true)
-            .appendingPathComponent(encodedProjectPath, isDirectory: true)
+        let encoded = QuickSessionPolicy.workingDirectory.replacingOccurrences(of: "/", with: "-")
+        return home.appendingPathComponent(".claude/projects").appendingPathComponent(encoded)
     }
 
     func start() {
-        guard timer == nil else { return }
-        rescan()
-        timer = Timer.scheduledTimer(withTimeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
-            self?.rescan()
+        guard !started else { return }
+        started = true
+        AppResourcePolicy.shared.observe(visibilityID) { [weak self] visible in
+            self?.setVisible(visible)
         }
     }
 
     func stop() {
+        started = false
+        AppResourcePolicy.shared.removeObserver(visibilityID)
+        setVisible(false)
+    }
+
+    func start(owner: UUID) {
+        windowOwners.insert(owner)
+        start()
+    }
+
+    func stop(owner: UUID) {
+        windowOwners.remove(owner)
+        stopIfUnused()
+    }
+
+    private func stopIfUnused() {
+        if windowOwners.isEmpty && trackedSessions.isEmpty { stop() }
+    }
+
+    private func setVisible(_ visible: Bool) {
+        isVisible = visible
         timer?.invalidate()
         timer = nil
+        watcher.stop()
+        refreshScheduled?.cancel()
+        refreshScheduled = nil
+        rescanPending = false
+        guard visible else { return }
+        startWatcher()
+        rescan()
+        // Reconcile missed events, newly created roots and removed transcripts.
+        timer = Timer.scheduledTimer(withTimeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
+            self?.startWatcher()
+            self?.rescan()
+        }
+        timer?.tolerance = 5
+    }
+
+    private func startWatcher() {
+        watcher.onPathsChange = { [weak self] _, _ in self?.scheduleRefresh() }
+        watcher.start(path: transcriptsDirectory.path)
+    }
+
+    private func scheduleRefresh() {
+        guard isVisible, refreshScheduled == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.refreshScheduled = nil
+            if self.isVisible { self.rescan() }
+        }
+        refreshScheduled = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
+    func track(sessionID: String, owner: UUID) {
+        guard trackedSessions[owner] != sessionID else { return }
+        trackedSessions[owner] = sessionID
+        start()
+        if isVisible { rescan() }
+    }
+
+    func untrack(owner: UUID) {
+        trackedSessions.removeValue(forKey: owner)
+        stopIfUnused()
+    }
+
+    func loadNextPage() {
+        guard hasMore, !isLoading else { return }
+        requestedCount += Self.pageSize
+        rescan()
     }
 
     func rescan() {
-        let directory = transcriptsDirectory
+        guard !isLoading else { rescanPending = true; return }
+        isLoading = true
+        let limit = requestedCount
+        let tracked = Set(trackedSessions.values)
         queue.async { [weak self] in
             guard let self else { return }
-            let scanned = Self.scanResult(directory: directory, cache: &self.cache)
+            let result = Self.scanClaude(directory: self.transcriptsDirectory, limit: limit + 1,
+                                         tracked: tracked, index: &self.titleIndex)
+            let combined = result.rows
+            let bytes = self.titleIndex.bytesRead
             DispatchQueue.main.async {
-                if self.conversations != scanned.conversations {
-                    self.conversations = scanned.conversations
-                }
-                if self.aiTitlesBySessionId != scanned.aiTitlesBySessionId {
-                    self.aiTitlesBySessionId = scanned.aiTitlesBySessionId
+                let visible = Array(combined.prefix(limit))
+                if self.conversations != visible { self.conversations = visible }
+                if self.aiTitlesBySessionId != result.titles { self.aiTitlesBySessionId = result.titles }
+                self.hasMore = result.hasMore || combined.count > limit
+                self.metadataBytesRead = bytes
+                self.isLoading = false
+                if self.rescanPending {
+                    self.rescanPending = false
+                    self.rescan()
                 }
             }
         }
     }
 
     static func scan(directory: URL) -> [QuickConversation] {
-        var cache: [String: CacheEntry] = [:]
-        return scanResult(directory: directory, cache: &cache).conversations
+        var index = TranscriptTitleIndex()
+        let result = scanClaude(directory: directory, limit: Int.max, tracked: [], index: &index)
+        return result.rows
     }
 
     static func scanAITitles(directory: URL) -> [String: String] {
-        var cache: [String: CacheEntry] = [:]
-        return scanResult(directory: directory, cache: &cache).aiTitlesBySessionId
+        var index = TranscriptTitleIndex()
+        return scanClaude(directory: directory, limit: Int.max, tracked: [], index: &index).titles
     }
 
-    private static func scanResult(
-        directory: URL,
-        cache: inout [String: CacheEntry]
-    ) -> ScanResult {
-        let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            cache.removeAll()
-            return ScanResult(conversations: [], aiTitlesBySessionId: [:])
+    static func scanClaude(
+        directory: URL, limit: Int, tracked: Set<String>, index: inout TranscriptTitleIndex
+    ) -> (rows: [QuickConversation], titles: [String: String], hasMore: Bool) {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles]
+        )) ?? []
+        let descriptors = files.compactMap { file -> (URL, String, Date)? in
+            let id = file.deletingPathExtension().lastPathComponent
+            guard file.pathExtension == "jsonl", UUID(uuidString: id) != nil,
+                  let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate else { return nil }
+            return (file, id, modified)
+        }.sorted { $0.2 == $1.2 ? $0.1 < $1.1 : $0.2 > $1.2 }
+        var rows: [QuickConversation] = []
+        var titles: [String: String] = [:]
+        var seenTitles = Set<String>()
+        var retained = Set<String>()
+        var hasMore = false
+        for (url, id, modified) in descriptors {
+            let neededForPage = rows.count < limit
+            if !neededForPage { hasMore = true }
+            guard neededForPage || tracked.contains(id) else { continue }
+            retained.insert(url.path)
+            guard let metadata = index.metadata(for: url) else { continue }
+            if let title = metadata.aiTitle { titles[id] = title }
+            guard neededForPage, let title = metadata.title else { continue }
+            let normalized = title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            guard seenTitles.insert(normalized).inserted else { continue }
+            rows.append(QuickConversation(id: id, title: title, aiTitle: metadata.aiTitle,
+                                          modifiedAt: modified, transcriptURL: url))
         }
-
-        var found: [QuickConversation] = []
-        var livePaths = Set<String>()
-        for file in files where file.pathExtension == "jsonl" {
-            let sessionId = file.deletingPathExtension().lastPathComponent
-            guard UUID(uuidString: sessionId) != nil,
-                  let modifiedAt = (try? file.resourceValues(
-                    forKeys: [.contentModificationDateKey]
-                  ))?.contentModificationDate else { continue }
-
-            livePaths.insert(file.path)
-            if let cached = cache[file.path], cached.modifiedAt == modifiedAt {
-                if let conversation = cached.conversation { found.append(conversation) }
-                continue
-            }
-
-            let parsed = parseTranscript(file, sessionId: sessionId, modifiedAt: modifiedAt)
-            cache[file.path] = CacheEntry(modifiedAt: modifiedAt, conversation: parsed)
-            if let parsed { found.append(parsed) }
-        }
-        cache = cache.filter { livePaths.contains($0.key) }
-        let aiTitles = Dictionary(uniqueKeysWithValues: found.compactMap { conversation in
-            conversation.aiTitle.map { (conversation.id, $0) }
-        })
-
-        // Claude resume가 새 sessionId 파일을 만들면 ai-title이 같은 transcript가
-        // 복수 생길 수 있다. 같은 표시 제목은 최신 파일을 resume 대상으로 삼는다.
-        var newestByTitle: [String: QuickConversation] = [:]
-        for conversation in found {
-            let key = normalizedTitle(conversation.title)
-            if let existing = newestByTitle[key], existing.modifiedAt >= conversation.modifiedAt {
-                continue
-            }
-            newestByTitle[key] = conversation
-        }
-        return ScanResult(
-            conversations: newestByTitle.values.sorted { $0.modifiedAt > $1.modifiedAt },
-            aiTitlesBySessionId: aiTitles
-        )
-    }
-
-    private static func parseTranscript(
-        _ url: URL,
-        sessionId: String,
-        modifiedAt: Date
-    ) -> QuickConversation? {
-        guard let data = try? Data(contentsOf: url),
-              let text = String(data: data, encoding: .utf8) else { return nil }
-
-        var lastAITitle: String?
-        var firstUserTitle: String?
-        for line in text.split(separator: "\n") {
-            guard let object = try? JSONSerialization.jsonObject(
-                with: Data(line.utf8)
-            ) as? [String: Any] else { continue }
-            if object["type"] as? String == "ai-title",
-               let title = object["aiTitle"] as? String {
-                let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty { lastAITitle = trimmed }
-            } else if firstUserTitle == nil,
-                      let userText = RecentActivityScanner.userText(from: object) {
-                firstUserTitle = userText
-            }
-        }
-        guard let title = lastAITitle ?? firstUserTitle else { return nil }
-        return QuickConversation(
-            id: sessionId,
-            title: title,
-            aiTitle: lastAITitle,
-            modifiedAt: modifiedAt,
-            transcriptURL: url
-        )
-    }
-
-    private static func normalizedTitle(_ title: String) -> String {
-        title
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
+        index.retain(paths: retained)
+        return (rows, titles, hasMore)
     }
 }

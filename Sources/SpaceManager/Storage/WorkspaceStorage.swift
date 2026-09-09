@@ -129,7 +129,9 @@ class WorkspaceStorage: ObservableObject {
     /// scene value가 없던 구 버전 상태의 1회 migration 경로. 새 복원 경로는 ID claim만 쓴다.
     func claimNextWindowState(kind: WindowKind) -> WindowState? {
         guard let state = windowStates.first(where: {
-            $0.resolvedKind == kind && !claimedWindowStateIds.contains($0.id)
+            $0.resolvedKind == kind
+                && !claimedWindowStateIds.contains($0.id)
+                && !Self.isDiscardableEmptyWorkspaceState($0)
         }) else {
             return nil
         }
@@ -147,8 +149,19 @@ class WorkspaceStorage: ObservableObject {
 
     func unclaimedWindowStates(for kind: WindowKind) -> [WindowState] {
         windowStates.filter {
-            $0.resolvedKind == kind && !claimedWindowStateIds.contains($0.id)
+            $0.resolvedKind == kind
+                && !claimedWindowStateIds.contains($0.id)
+                && !Self.isDiscardableEmptyWorkspaceState($0)
         }
+    }
+
+    /// An explicitly empty workspace window carries no durable user data. It
+    /// should not multiply during macOS scene restoration; a fresh Cmd-N window
+    /// remains available while the app is running.
+    static func isDiscardableEmptyWorkspaceState(_ state: WindowState) -> Bool {
+        state.resolvedKind == .workspace
+            && state.workspaces?.isEmpty == true
+            && state.workspaceTabs.isEmpty
     }
 
     var claimedCount: Int { claimedWindowStateIds.count }

@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 @testable import SpaceManager
 
 final class RecentActivityScannerTests: XCTestCase {
@@ -225,4 +226,97 @@ final class RecentActivityScannerTests: XCTestCase {
             in: result.trackedTranscripts, now: now
         ), ["/tmp/shared"])
     }
+    func testWarmScanParsesOnlyChangedFilesAndStillExpiresCachedActivity() throws {
+        let now = Date()
+        for i in 0..<40 {
+            _ = try writeTranscript(project: "-tmp-cached", session: "s\(i)", lines: [
+                "{\"type\":\"user\",\"cwd\":\"/tmp/cached\",\"message\":{\"content\":\"request \(i)\"}}",
+            ], mtime: now.addingTimeInterval(-10))
+        }
+        var cwd: [String: String] = [:]
+        var cache = FileMetadataCache<RecentActivityScanner.Tail>()
+        let first = RecentActivityScanner.scan(projectsDir: tempDir, cwdCache: &cwd, tailCache: &cache, now: now)
+        XCTAssertEqual(cache.loadCount, 40)
+        let second = RecentActivityScanner.scan(projectsDir: tempDir, cwdCache: &cwd, tailCache: &cache, now: now)
+        XCTAssertEqual(Set(first.sessions.map(\.id)), Set(second.sessions.map(\.id)))
+        XCTAssertEqual(cache.loadCount, 40)
+        _ = try writeTranscript(project: "-tmp-cached", session: "s0", lines: [
+            #"{"type":"user","cwd":"/tmp/cached","message":{"content":"changed"}}"#,
+        ], mtime: now)
+        let changed = RecentActivityScanner.scan(projectsDir: tempDir, cwdCache: &cwd, tailCache: &cache, now: now)
+        XCTAssertEqual(changed.sessions.first?.snippet, "changed")
+        XCTAssertEqual(cache.loadCount, 41)
+        let expired = RecentActivityScanner.scan(projectsDir: tempDir, cwdCache: &cwd,
+            tailCache: &cache, now: now.addingTimeInterval(90_000))
+        XCTAssertTrue(expired.activityByCwd.isEmpty)
+        XCTAssertEqual(cache.count, 0)
+        XCTAssertTrue(cwd.isEmpty)
+    }
+
+    func testTailStartingInsideUnicodeDoesNotDiscardValidRecords() throws {
+        let file = tempDir.appendingPathComponent("unicode.jsonl")
+        let ending = Data(("\n" + #"{"type":"user","cwd":"/tmp/unicode","message":{"content":"안녕"}}"# + "\n").utf8)
+        var bytes = Data(repeating: 0x80, count: 150_000)
+        bytes.append(ending)
+        try bytes.write(to: file)
+        let result = RecentActivityScanner.parseTail(of: file)
+        XCTAssertEqual(result.cwd, "/tmp/unicode")
+        XCTAssertEqual(result.snippet, "안녕")
+    }
+
+    func testGeneratingExpirationKeepsOtherFilesInSameWorkspaceActive() {
+        let now = Date()
+        var index = GeneratingActivityIndex()
+        index.entries["old"] = .init(cwd: "/tmp/shared", modified: now.addingTimeInterval(-3))
+        index.entries["new"] = .init(cwd: "/tmp/shared", modified: now)
+        XCTAssertEqual(index.directories(now: now.addingTimeInterval(2)), ["/tmp/shared"])
+        XCTAssertTrue(index.directories(now: now.addingTimeInterval(5)).isEmpty)
+        XCTAssertNil(index.nextExpiration(now: now.addingTimeInterval(5)))
+        index.entries["new"] = nil
+        XCTAssertTrue(index.directories(now: now.addingTimeInterval(2)).isEmpty)
+    }
+
+    func testVisibleFileEventsUpdateActivityAndHiddenScannerDoesNoWork() throws {
+        let file = try writeTranscript(project: "-tmp-event", session: "event", lines: [
+            #"{"type":"assistant","cwd":"/tmp/event","message":{"content":"hello"}}"#,
+        ], mtime: Date().addingTimeInterval(-60))
+        let scanner = RecentActivityScanner(projectsDir: tempDir,
+            codexSessionsDir: tempDir.appendingPathComponent("missing-codex"),
+            geminiDir: tempDir.appendingPathComponent("missing-gemini"))
+        defer { scanner.stop() }
+        let appeared = expectation(description: "Changed transcript shows generating")
+        var tokens = Set<AnyCancellable>()
+        scanner.$generatingDirectories.filter { $0.contains("/tmp/event") }.prefix(1)
+            .sink { _ in appeared.fulfill() }.store(in: &tokens)
+        scanner.setVisible(true)
+        let write = expectation(description: "Initial scan finished and append written")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            do {
+                let handle = try FileHandle(forWritingTo: file)
+                try handle.seekToEnd()
+                try handle.write(contentsOf: Data("\n{}\n".utf8))
+                try handle.close()
+            } catch { XCTFail("\(error)") }
+            write.fulfill()
+        }
+        wait(for: [write, appeared], timeout: 5)
+        scanner.setVisible(false)
+        let stats = scanner.fileStatCount
+        let loads = scanner.metadataLoadCount
+        scanner.filesChanged([file.path])
+        let stayedIdle = expectation(description: "Hidden scanner stays idle")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            XCTAssertEqual(scanner.fileStatCount, stats)
+            XCTAssertEqual(scanner.metadataLoadCount, loads)
+            stayedIdle.fulfill()
+        }
+        wait(for: [stayedIdle], timeout: 2)
+        let resumed = expectation(description: "Resume reconciles changes made while hidden")
+        scanner.$sessions.filter { $0.first?.snippet == "while hidden" }.prefix(1)
+            .sink { _ in resumed.fulfill() }.store(in: &tokens)
+        try Data(#"{"type":"user","cwd":"/tmp/event","message":{"content":"while hidden"}}"#.utf8).write(to: file)
+        scanner.setVisible(true)
+        wait(for: [resumed], timeout: 5)
+    }
+
 }

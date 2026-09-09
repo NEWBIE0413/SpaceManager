@@ -51,7 +51,25 @@
     return true;
   });
 
-  new ResizeObserver(function () { fit.fit(); }).observe(document.getElementById('terminal'));
+  // Native layout and ResizeObserver can describe the same change. Coalesce
+  // both paths into one fit per browser frame, including late font metrics.
+  let fitFrame = 0;
+  function scheduleFit() {
+    // Offscreen windows suspend rAF. Initial sizing and restoration must still
+    // work there; this is event driven, never a background polling timer.
+    if (document.hidden) {
+      if (fitFrame) { cancelAnimationFrame(fitFrame); fitFrame = 0; }
+      try { fit.fit(); } catch (e) {}
+      return;
+    }
+    if (fitFrame) { return; }
+    fitFrame = requestAnimationFrame(function () {
+      fitFrame = 0;
+      try { fit.fit(); } catch (e) {}
+    });
+  }
+  new ResizeObserver(scheduleFit).observe(document.getElementById('terminal'));
+  document.fonts.ready.then(scheduleFit);
 
   // --- WKWebView 한글 IME 수정 (xterm.js PR #5704 백포트) ---
   // WKWebView는 한글 조합을 composition 이벤트가 아니라 insertText(첫 자모) +
@@ -178,11 +196,32 @@
   window.smGetSelection = function () { return term.getSelection(); };
   window.smSelectAll = function () { term.selectAll(); };
   window.smFocus = function () { term.focus(); };
-  window.smFit = function () { try { fit.fit(); } catch (e) {} };
+  window.smFit = scheduleFit;
+  let presentation = 0;
+  let presentationRender = null;
+  window.smPreparePresentation = function (token) {
+    presentation = token;
+    if (presentationRender) { presentationRender.dispose(); presentationRender = null; }
+    scheduleFit();
+    // Drain already queued output before refreshing the retained buffer. This
+    // also works for a cold tab whose page became ready after it was attached.
+    term.write('', function () {
+      if (presentation !== token) { return; }
+      presentationRender = term.onRender(function () {
+        presentationRender.dispose();
+        presentationRender = null;
+        requestAnimationFrame(function () {
+          if (presentation === token) { post('presented', token); }
+        });
+      });
+      term.refresh(0, term.rows - 1);
+    });
+  };
   window.smSetTheme = function (theme) {
     term.options.theme = theme;
     document.documentElement.style.setProperty('--term-bg', theme.background);
     document.documentElement.style.setProperty('--term-fg', theme.foreground);
+    document.body.style.backgroundColor = theme.background;
   };
 
   post('ready', { cols: term.cols, rows: term.rows });

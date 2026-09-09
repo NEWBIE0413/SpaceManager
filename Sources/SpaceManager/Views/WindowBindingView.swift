@@ -6,6 +6,12 @@ enum WindowSurfacePolicy {
         window.isOpaque = false
         window.backgroundColor = .clear
     }
+
+    static func updateWindowControls(_ window: NSWindow, kind: WindowKind) {
+        for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            window.standardWindowButton(type)?.isHidden = kind == .workspace
+        }
+    }
 }
 
 enum WindowIdentity {
@@ -138,6 +144,7 @@ final class WindowBindingNSView: NSView {
         // ContentView가 AppState 변경을 관찰해 updateNSView를 다시 호출하므로
         // 워크스페이스 전환과 같은 렌더 사이클에 창 제목도 갱신된다.
         window.title = title
+        WindowSurfacePolicy.updateWindowControls(window, kind: appState.windowKind)
 
         // full-size titlebar 설정과 무관하게 창별 AppState 바인딩은 유지한다.
         // 아일랜드의 다른 창 워크스페이스 점프가 이 연결을 사용한다.
@@ -207,6 +214,9 @@ final class WindowBindingNSView: NSView {
     private func scheduleWindowPresentationSave() {
         pendingPresentationSave?.cancel()
         let item = DispatchWorkItem { [weak self] in
+            if let self, let window = self.boundWindow, let appState = self.appState {
+                WindowSurfacePolicy.updateWindowControls(window, kind: appState.windowKind)
+            }
             self?.flushWindowPresentation()
         }
         pendingPresentationSave = item
