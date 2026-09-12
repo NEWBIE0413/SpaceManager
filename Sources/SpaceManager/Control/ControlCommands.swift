@@ -166,7 +166,7 @@ enum ControlCommands {
             return [
                 "sessions": scanner.sessions.map {
                     ["id": $0.id, "provider": $0.provider.rawValue, "cwd": $0.cwd, "name": $0.name,
-                     "lastActivity": iso($0.lastActivity), "snippet": $0.snippet ?? ""]
+                     "lastActivity": iso($0.lastActivity), "snippet": $0.snippet ?? "", "host": $0.host ?? ""]
                 },
                 "workspaceActivity": scanner.workspaceActivity.mapValues(iso),
                 "generating": Array(scanner.generatingDirectories).sorted(),

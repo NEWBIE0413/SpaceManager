@@ -8,6 +8,7 @@ struct RecentAgentSession: Identifiable, Equatable {
     let name: String        // 표시용 — cwd 마지막 경로 요소
     let lastActivity: Date
     let snippet: String?    // 마지막 유저 메시지 한 줄 — "무슨 작업이었는지"의 단서
+    var host: String? = nil // 원격 머신에서 돈 세션이면 ssh 별칭 (cwd는 이미 로컬 경로로 옮겨져 있다)
 }
 
 /// ~/.claude/projects/*/<uuid>.jsonl 의 mtime으로 "최근 대화가 오간" 세션을 찾는다.
@@ -19,6 +20,10 @@ struct RecentAgentSession: Identifiable, Equatable {
 /// 한 번의 스캔이 두 소비자를 먹인다:
 /// - 아일랜드: 지난 1시간, 상위 8개, 스니펫 포함
 /// - 사이드바 활동 점: 지난 24시간, cwd별 마지막 대화 시각 (진하기 계산용)
+///
+/// 원격 워크스페이스의 활동은 `~/.space-manager/remote/<host>/activity.json`(미러 스크립트가
+/// 5초마다 갈아 끼우는 요약)에서 온다. 그 파일의 교체는 같은 FSEvents로 잡아 요약만 다시
+/// 읽고, 로컬 transcript 탐색은 건드리지 않는다.
 ///
 /// 파일 변경은 FSEvents로 감지하고 알려진 변경 파일만 stat한다. 생성 표시의
 /// 만료는 메모리상의 mtime과 단발 타이머로 처리한다. 30초 재탐색은 유실된 이벤트와
@@ -56,6 +61,7 @@ final class RecentActivityScanner: ObservableObject {
     private let projectsDir: URL
     private let codexSessionsDir: URL
     private let geminiDir: URL
+    private let remoteMirrorsDir: URL
     private var discoveryTimer: Timer?
     private var expirationTimer: Timer?
     private let watcher = DirectoryWatcher()
@@ -70,6 +76,10 @@ final class RecentActivityScanner: ObservableObject {
     private var unresolvedPaths = Set<String>()
     private var trackedByPath: [String: TrackedTranscript] = [:]
     private var generatingIndex = GeneratingActivityIndex()
+    /// 마지막 로컬 탐색 결과와 마지막 원격 요약 — 둘 중 하나만 바뀌어도 합쳐서 다시 게시한다
+    private var localResult = ScanResult()
+    private var remoteResult = RemoteActivityMirror.Result()
+    private var remoteReloadPending = false
     private var visibilityGeneration = 0
     private(set) var fileStatCount = 0
     private(set) var metadataLoadCount = 0
@@ -82,11 +92,13 @@ final class RecentActivityScanner: ObservableObject {
     init(
         projectsDir: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects"),
         codexSessionsDir: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions"),
-        geminiDir: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".gemini")
+        geminiDir: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".gemini"),
+        remoteMirrorsDir: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".space-manager/remote")
     ) {
         self.projectsDir = projectsDir
         self.codexSessionsDir = codexSessionsDir
         self.geminiDir = geminiDir
+        self.remoteMirrorsDir = remoteMirrorsDir
     }
 
     func start() {
@@ -138,7 +150,7 @@ final class RecentActivityScanner: ObservableObject {
         watcher.onPathsChange = { [weak self] paths, fullRescan in
             self?.filesChanged(paths, fullRescan: fullRescan)
         }
-        watcher.start(paths: [projectsDir.path, codexSessionsDir.path, geminiDir.path])
+        watcher.start(paths: [projectsDir.path, codexSessionsDir.path, geminiDir.path, remoteMirrorsDir.path])
     }
 
     func rescan() {
@@ -151,6 +163,7 @@ final class RecentActivityScanner: ObservableObject {
             let records = AgentActivitySources.scanCodex(sessionsDir: self.codexSessionsDir, cache: &self.sourceCache)
                 + AgentActivitySources.scanGemini(geminiDir: self.geminiDir, cache: &self.sourceCache)
             Self.merge(records: records, into: &result)
+            let remote = RemoteActivityMirror.scan(mirrorsDir: self.remoteMirrorsDir)
             var index = GeneratingActivityIndex()
             var tracked: [String: TrackedTranscript] = [:]
             for transcript in result.trackedTranscripts {
@@ -164,13 +177,13 @@ final class RecentActivityScanner: ObservableObject {
             DispatchQueue.main.async {
                 self.isScanning = false
                 if generation == self.visibilityGeneration {
-                    if self.sessions != result.sessions { self.sessions = result.sessions }
-                    if self.workspaceActivity != result.activityByCwd { self.workspaceActivity = result.activityByCwd }
+                    self.localResult = result
+                    self.remoteResult = remote
                     self.trackedByPath = tracked
                     self.generatingIndex = index
                     self.fileStatCount += result.trackedTranscripts.count
                     self.metadataLoadCount = loads
-                    self.publishGenerating()
+                    self.publishCombined()
                 }
                 if self.rescanPending {
                     self.rescanPending = false
@@ -180,10 +193,41 @@ final class RecentActivityScanner: ObservableObject {
         }
     }
 
+    /// 원격 요약만 다시 읽는다 — 미러 파일이 5초마다 바뀌므로 그때마다 로컬 전체 탐색을
+    /// 돌리면 원격 지원이 로컬 비용을 키운다. 로컬 결과는 마지막 것을 그대로 쓴다.
+    private func reloadRemote() {
+        guard !remoteReloadPending else { return }
+        remoteReloadPending = true
+        let generation = visibilityGeneration
+        queue.async { [weak self] in
+            guard let self else { return }
+            let remote = RemoteActivityMirror.scan(mirrorsDir: self.remoteMirrorsDir)
+            DispatchQueue.main.async {
+                self.remoteReloadPending = false
+                guard self.isVisible, self.visibilityGeneration == generation else { return }
+                self.remoteResult = remote
+                self.publishCombined()
+            }
+        }
+    }
+
+    /// 로컬 탐색 + 원격 요약을 합쳐 게시한다. 아일랜드 순서·개수 제한은 합친 뒤에 적용한다.
+    private func publishCombined() {
+        var result = localResult
+        Self.merge(records: remoteResult.records, into: &result)
+        if sessions != result.sessions { sessions = result.sessions }
+        if workspaceActivity != result.activityByCwd { workspaceActivity = result.activityByCwd }
+        generatingIndex.entries = generatingIndex.entries.filter { !$0.key.hasPrefix("remote/") }
+            .merging(remoteResult.generating) { _, new in new }
+        publishGenerating()
+    }
+
     func filesChanged(_ paths: Set<String>, fullRescan: Bool = false) {
         guard isVisible else { return }
         if fullRescan { startWatcher(); scheduleDiscovery() }
         let normalized = Set(paths.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path })
+        let mirrorRoot = remoteMirrorsDir.resolvingSymlinksInPath().path + "/"
+        if normalized.contains(where: { $0.hasPrefix(mirrorRoot) }) { reloadRemote() }
         let changed = normalized.compactMap { path in trackedByPath[path].map { (path, $0) } }
         // Unknown/new transcripts get one early discovery. A record that has not
         // written its identity yet is retried by the 30-second reconciliation.
@@ -323,7 +367,8 @@ final class RecentActivityScanner: ObservableObject {
                     cwd: record.cwd,
                     name: record.cwd == home ? "~" : URL(fileURLWithPath: record.cwd).lastPathComponent,
                     lastActivity: record.lastActivity,
-                    snippet: record.snippet
+                    snippet: record.snippet,
+                    host: record.host
                 ))
             }
         }

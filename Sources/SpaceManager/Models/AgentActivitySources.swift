@@ -13,6 +13,8 @@ struct AgentActivityRecord: Equatable {
     let lastActivity: Date
     let snippet: String?
     let growingFile: URL?
+    /// 원격 미러에서 온 레코드면 ssh 별칭. 로컬은 nil.
+    var host: String? = nil
 }
 
 enum AgentActivitySources {

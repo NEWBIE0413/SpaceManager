@@ -3,7 +3,7 @@ import Foundation
 /// Expiration is an in-memory operation. Only discovery or a filesystem event
 /// supplies a fresh mtime; an idle app never stats all transcripts on a fast timer.
 struct GeneratingActivityIndex {
-    struct Entry {
+    struct Entry: Equatable {
         let cwd: String
         let modified: Date
     }

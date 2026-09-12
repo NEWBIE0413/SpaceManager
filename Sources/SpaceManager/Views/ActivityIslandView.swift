@@ -176,10 +176,18 @@ private struct IslandSessionRow: View {
     var body: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(session.name)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.92))
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(session.name)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.92))
+                        .lineLimit(1)
+                    if let host = session.host {
+                        // 원격 머신에서 도는 세션 — 사이드바의 원격 배지와 같은 표식
+                        Text("@\(host)")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.45))
+                    }
+                }
 
                 if let snippet = session.snippet {
                     Text(snippet)

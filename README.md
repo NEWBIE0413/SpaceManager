@@ -153,6 +153,22 @@ The ssh alias comes from `~/.ssh/config`; a `ProxyCommand` that picks the
 route (VPN or LAN) works transparently, and `ControlMaster` keeps reconnects
 cheap.
 
+### Remote activity
+
+Activity dots and the island read local transcripts, so a remote workspace
+would otherwise stay dark. `scripts/remote-activity-mirror.sh <host>` closes
+that gap without copying transcripts: every five seconds it runs
+`scripts/remote-activity-summary.py` on the host over ssh (sent on stdin, so
+nothing is installed there) and stores the result, a few kilobytes of
+per-transcript cwd, last-event time, and last user message, in
+`~/.space-manager/remote/<host>/activity.json`. The app watches that folder,
+maps remote-home paths back to the local home, and tags the sessions with the
+host. The generating indicator uses the remote mtimes with clock skew
+corrected from the summary's own timestamp, and stops after 30 seconds without
+a fresh summary. Install it as a launchd agent with
+`scripts/install-remote-mirror.sh <host>` (`--uninstall` removes it). The
+mirror only pulls; the remote machine never needs to reach the Mac.
+
 ## sm CLI
 
 Everything the app can do is also available from the terminal. The app opens a
