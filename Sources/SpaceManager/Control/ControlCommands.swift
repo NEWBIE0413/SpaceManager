@@ -131,8 +131,12 @@ enum ControlCommands {
             guard let session = entry.state.selectedSession else { throw fail("tab not created") }
             return describe(session, selected: true)
 
-        case "tab.select", "tab.close":
+        case "tab.select", "tab.close", "tab.reconnect":
             let (entry, session) = try tab(r)
+            if r.command == "tab.reconnect" {
+                session.reconnectIfNeeded()
+                return describe(session, selected: entry.state.selectedSession?.id == session.id)
+            }
             if r.command == "tab.select" {
                 entry.state.selectSession(session)
                 if r.bool("focus") ?? true { focus(entry) }
@@ -397,6 +401,8 @@ enum ControlCommands {
             "tmuxSession": s.tmuxSessionName ?? "",
             "remoteHost": s.remoteHost ?? "",
             "running": s.isRunning,
+            "reconnecting": s.isReconnecting,
+            "error": s.startError ?? "",
             "selected": selected,
         ]
     }

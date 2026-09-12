@@ -198,6 +198,12 @@ enum TmuxBootstrap {
         let cold = coldBootScript(sessionName: sessionName, directoryExpression: "\"$WD\"", birther: true)
         return """
         WD=\(dir)
+        # The managed server can expose its socket before ExecStartPost restores
+        # the saved panes. systemd start waits for that job instead of creating
+        # an empty session that would claim the saved session's name.
+        if [ -f "$HOME/.config/systemd/user/tmux-server.service.d/persistence.conf" ]; then
+          systemctl --user start tmux-server.service || exit 1
+        fi
         SOCK="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/default"
         if [ -S "$SOCK" ]; then
           tmux has-session -t \(name) 2>/dev/null || tmux new-session -d -s \(name) -c "$WD"
@@ -211,7 +217,7 @@ enum TmuxBootstrap {
     /// tmux가 붙을 수 있게 하고, keepalive로 슬립/네트워크 전환 시 죽은 세션을 빨리 정리한다.
     static func remoteLaunchCommand(host: String, remoteScript: String) -> String {
         let remoteCommand = "bash -lc " + remoteScript.shQuoted
-        return "exec ssh -t -o ServerAliveInterval=5 -o ServerAliveCountMax=3 "
+        return "exec ssh -t -o ConnectTimeout=8 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 "
             + host.shQuoted + " -- " + remoteCommand.shQuoted
     }
 

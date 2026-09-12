@@ -246,15 +246,19 @@ class AppState: ObservableObject {
     func setRemoteHost(_ workspace: Workspace, to raw: String) {
         guard let index = workspaceIndex(id: workspace.id) else { return }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        workspaces[index].remoteHost = trimmed.isEmpty ? nil : trimmed
+        let host = trimmed.isEmpty ? nil : trimmed
+        guard workspaces[index].remoteHost != host else { return }
+        workspaces[index].remoteHost = host
         workspaces[index].updatedAt = Date()
         let ws = workspaces[index]
         if selectedWorkspace?.id == ws.id {
             selectedWorkspace = ws
         }
-        // 호스트가 바뀌면 이 워크스페이스의 모든 탭을 다시 붙여야 한다
-        for session in sessionsByWorkspace[ws.id] ?? [] { session.cleanup() }
-        sessionsByWorkspace[ws.id] = []
+        // 대상만 바꾼다. 배열을 비우면 추가 tmux 탭과 선택 ID까지 사라진다.
+        let previous = sessions(for: ws)
+        let updated = previous.map { $0.retargeted(to: host) }
+        for session in previous { session.cleanup() }
+        sessionsByWorkspace[ws.id] = updated
         if selectedWorkspace?.id == ws.id {
             ensureSessions(for: ws)
             selectedSessionIdByWorkspace[ws.id] = selectedSession?.id
@@ -465,6 +469,7 @@ class AppState: ObservableObject {
 
     func selectSession(_ session: TerminalSession) {
         guard selectedSession?.id != session.id else {
+            session.restartIfDead()
             session.focusTerminal()
             return
         }

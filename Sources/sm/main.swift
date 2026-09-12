@@ -26,6 +26,7 @@ sm — SpaceManager를 터미널에서 조작한다
   sm tabs [ws]                        탭 목록
   sm tab shell|tmux [ws]              탭 추가
   sm tab select|close <tab>           탭 선택/닫기
+  sm tab reconnect <tab>              끊어진 연결 재시도 (실행 중 세션 유지)
   sm tab next|prev
 
   sm quick [list] [-n N]              최근 Claude 대화
@@ -127,7 +128,7 @@ do {
     case ("tabs", _): command = "tab.list"; if let s = sub { args["ws"] = s }
     case ("tab", "list"): command = "tab.list"; if let w = rest.first { args["ws"] = w }
     case ("tab", "shell"), ("tab", "tmux"): command = "tab.\(sub!)"; if let w = rest.first { args["ws"] = w }
-    case ("tab", "select"), ("tab", "close"): command = "tab.\(sub!)"; args["tab"] = try need(1, "sm tab \(sub!) <tab>")[0]
+    case ("tab", "select"), ("tab", "close"), ("tab", "reconnect"): command = "tab.\(sub!)"; args["tab"] = try need(1, "sm tab \(sub!) <tab>")[0]
     case ("tab", "next"), ("tab", "prev"): command = "tab.\(sub!)"
     case ("quick", nil), ("quick", "list"): command = "quick.list"; args["limit"] = Int(flags["limit"] ?? "30") ?? 30
     case ("quick", "new"):

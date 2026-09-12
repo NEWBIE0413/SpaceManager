@@ -17,6 +17,7 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     @Published var name: String
     @Published var isRunning: Bool = false
     @Published var startError: String?
+    @Published private(set) var isReconnecting = false
     var workingDirectory: String
     /// tmuxMain/tmuxExtra가 attach할 세션명 (shell이면 nil)
     let tmuxSessionName: String?
@@ -33,6 +34,8 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     private var quickIdentityTimer: Timer?
     private var quickTitleCancellable: AnyCancellable?
     private var isTrackingQuickTitle = false
+    private var reconnectTimer: Timer?
+    private var reconnectAttempt = 0
 
     init(id: UUID = UUID(), kind: TabKind, name: String,
          workingDirectory: String, tmuxSessionName: String? = nil,
@@ -81,6 +84,7 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     }
 
     private func startPTY() {
+        cancelReconnect()
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let execName = "-" + (shell as NSString).lastPathComponent
         var env = ProcessInfo.processInfo.environment
@@ -113,8 +117,13 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
         let pty = PTYProcess()
         let view = terminalView
         pty.onOutput = { [weak view] data in view?.feed(data) }   // feed 내부에서 메인 큐 배칭
-        pty.onExit = { [weak self] _ in
-            DispatchQueue.main.async { self?.isRunning = false }
+        let launchedAt = Date()
+        pty.onExit = { [weak self, weak pty] code in
+            DispatchQueue.main.async {
+                guard let self, let pty, self.pty === pty, self.started else { return }
+                self.isRunning = false
+                self.scheduleReconnect(exitCode: code, connectedFor: Date().timeIntervalSince(launchedAt))
+            }
         }
         do {
             try pty.start(
@@ -204,15 +213,47 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     /// 죽은 탭 재시작 (프로세스 종료·시작 실패 후 재시도)
     func restartIfDead() {
         guard started, pty?.isRunning != true else { return }
+        cancelReconnect()
         pty?.terminate()
         pty = nil
         startError = nil
         startPTY()
     }
 
+    private func scheduleReconnect(exitCode: Int32, connectedFor: TimeInterval) {
+        guard let delay = RemoteReconnectPolicy.delay(kind: kind, remoteHost: remoteHost,
+            exitCode: exitCode, attempt: reconnectAttempt, connectedFor: connectedFor) else { return }
+        if connectedFor >= 30 { reconnectAttempt = 0 }
+        reconnectAttempt += 1
+        isReconnecting = true
+        startError = "연결이 끊겼습니다. \(Int(delay))초 뒤 다시 연결합니다."
+        reconnectTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            self?.restartIfDead()
+        }
+    }
+
+    private func cancelReconnect() {
+        reconnectTimer?.invalidate()
+        reconnectTimer = nil
+        isReconnecting = false
+    }
+
+    /// CLI도 화면 선택과 같은 경로로 죽은 연결을 복구한다. 실행 중인 tmux는 건드리지 않는다.
+    func reconnectIfNeeded() {
+        _ = getOrCreateTerminal()
+        restartIfDead()
+    }
+
+    func retargeted(to host: String?) -> TerminalSession {
+        TerminalSession(id: id, kind: kind, name: name, workingDirectory: workingDirectory,
+                        tmuxSessionName: tmuxSessionName, remoteHost: host,
+                        quickLaunch: quickLaunch, quickConfiguration: quickConfiguration)
+    }
+
     /// WKWebView 프로세스 크래시: 페이지 리로드 + PTY 재시작.
     /// tmux 세션은 서버에 살아있으므로 재attach로 무손실 복구된다 (스펙 §7).
     private func recoverFromCrash() {
+        cancelReconnect()
         pty?.terminate()
         pty = nil
         started = false          // 리로드 후 ready가 다시 오면 startIfNeeded가 재시작
@@ -226,6 +267,8 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     }
 
     func cleanup(force: Bool = false) {
+        started = false
+        cancelReconnect()
         if isTrackingQuickTitle { QuickConversationScanner.shared.untrack(owner: id) }
         isTrackingQuickTitle = false
         quickIdentityTimer?.invalidate()
@@ -238,6 +281,7 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     }
 
     deinit {
+        reconnectTimer?.invalidate()
         quickIdentityTimer?.invalidate()
         if isTrackingQuickTitle { QuickConversationScanner.shared.untrack(owner: id) }
     }
@@ -279,6 +323,19 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
             )]
         }
         return []   // 순수 인터랙티브 로그인 셸
+    }
+}
+
+/// Only a persistent remote tmux attachment is retried. A deliberate detach (0),
+/// a shell exit or a Quick conversation must stay closed. Cap retries while a host sleeps.
+enum RemoteReconnectPolicy {
+    static func delay(kind: TabKind, remoteHost: String?, exitCode: Int32,
+                      attempt: Int, connectedFor: TimeInterval) -> TimeInterval? {
+        guard kind == .tmuxMain || kind == .tmuxExtra,
+              let remoteHost, !remoteHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              exitCode != 0 else { return nil }
+        let failures = connectedFor >= 30 ? 0 : min(4, max(0, attempt))
+        return min(30, 3 * pow(2, Double(failures)))
     }
 }
 

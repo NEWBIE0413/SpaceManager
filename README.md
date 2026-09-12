@@ -145,13 +145,37 @@ alias from the workspace's context menu (**Set Remote Host...**) or with
   both machines needs no per-workspace configuration. Paths outside the home
   are sent unchanged.
 - Changing the host detaches the workspace's tabs and re-attaches them; tmux
-  sessions on either machine are untouched.
+  sessions on either machine are untouched. Extra tabs retain their IDs, order
+  and tmux session names.
 - Remote workspaces show the host as a small badge in the sidebar and do not
   need a local tmux install.
 
 The ssh alias comes from `~/.ssh/config`; a `ProxyCommand` that picks the
 route (VPN or LAN) works transparently, and `ControlMaster` keeps reconnects
 cheap.
+
+### Reconnect and Linux session persistence
+
+An interrupted remote tmux connection reconnects after 3 seconds, with failed
+attempts backing off to 30 seconds. An explicit tmux detach and transient shell
+or Quick tabs remain closed. Selecting a disconnected tab or running
+`sm tab reconnect <tab>` retries immediately.
+
+On a Linux host with `tmux-resurrect` installed under `~/.tmux/plugins`, copy
+`scripts/{remote-tmux-persistence.sh,tmux-session-metadata.py,install-remote-tmux-persistence.sh}`
+to the same directory and run the installer there. It adds a user timer that
+saves every minute, a save before server shutdown, and a restore after server
+startup. Saves work without an attached client or a status-right command.
+The companion preserves smux labels and keys. The managed startup waits for
+restoration before any app tab can create a session with a saved name.
+
+Checkpoints live under `~/.smux/state/persistence`. They preserve window and
+pane layouts, working directories and allowlisted Claude/Codex commands; they
+do not checkpoint process memory. Resume an agent with an explicit conversation
+ID to keep that command restorable. Other processes return to a shell after
+reboot. `scripts/sync-remote-tmux-display.py <host>` copies the local smux theme,
+navigation keys and pane numbering, retaining Linux clipboard commands and the
+native save timer. Both home and XDG tmux configuration entry points are covered.
 
 ### Remote activity
 
@@ -195,6 +219,7 @@ sm project add|remove <ws> <path>   추가 프로젝트 폴더
 sm tabs [ws]                        탭 목록
 sm tab shell|tmux [ws]              탭 추가
 sm tab select|close <tab>           탭 선택/닫기
+sm tab reconnect <tab>              끊어진 연결 재시도 (실행 중 세션 유지)
 sm tab next|prev
 
 sm quick [list] [-n N]              최근 Claude 대화
