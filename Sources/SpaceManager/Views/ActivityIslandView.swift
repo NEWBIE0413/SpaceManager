@@ -141,9 +141,9 @@ struct IslandPanelView: View {
                     ForEach(scanner.sessions) { session in
                         IslandSessionRow(
                             session: session,
-                            canJump: windowRegistry.canJump(to: session.cwd, preferredState: appState),
+                            canJump: windowRegistry.canJump(to: session.cwd, host: session.host, preferredState: appState),
                             onJump: {
-                                if windowRegistry.jump(to: session.cwd, preferredState: appState) {
+                                if windowRegistry.jump(to: session.cwd, host: session.host, preferredState: appState) {
                                     hover.setPanel(false)
                                 }
                             }

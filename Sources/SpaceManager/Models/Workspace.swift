@@ -45,6 +45,17 @@ struct Workspace: Codable, Identifiable, Equatable {
         TmuxBootstrap.remoteDirectory(forLocalPath: rootPath)
     }
 
+    /// A host switch changes the attachment, not the project files. Refuse a
+    /// missing Mac checkout instead of silently starting a shell in the home directory.
+    func executionLocationError(host: String?) -> String? {
+        guard host?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true else { return nil }
+        var directory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: rootPath, isDirectory: &directory), directory.boolValue else {
+            return "이 Mac에 작업 폴더가 없습니다. 폴더를 먼저 복원하거나 복사해 주세요.\n\(rootPath)"
+        }
+        return nil
+    }
+
     var name: String {
         customName ?? URL(fileURLWithPath: rootPath).lastPathComponent
     }

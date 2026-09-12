@@ -2,6 +2,15 @@ import XCTest
 @testable import SpaceManager
 
 final class WorkspaceWindowRegistryTests: XCTestCase {
+    func testSameProjectOnAnotherHostCannotStealActivityJump() throws {
+        let local = Workspace(rootPath: "/tmp/project")
+        let remote = Workspace(rootPath: "/tmp/project", remoteHost: "arch")
+        let candidates = [(owner: "current", workspace: local), (owner: "other", workspace: remote)]
+        XCTAssertEqual(WorkspaceWindowRegistry.bestRoute(containing: "/tmp/project", host: "arch", candidates: candidates, preferredOwner: "current")?.workspace.id, remote.id)
+        XCTAssertEqual(WorkspaceWindowRegistry.bestRoute(containing: "/tmp/project", candidates: candidates, preferredOwner: "other")?.workspace.id, local.id)
+        XCTAssertNil(WorkspaceWindowRegistry.bestRoute(containing: "/tmp/project", host: "nuc", candidates: candidates, preferredOwner: "current"))
+    }
+
     func testDeepestContainingWorkspaceWins() throws {
         let root = Workspace(rootPath: "/tmp/project")
         let nested = Workspace(rootPath: "/tmp/project/packages/client")

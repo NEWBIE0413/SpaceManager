@@ -62,7 +62,9 @@ enum ControlCommands {
             guard let path = r.string("path") else { throw fail("path required") }
             let expanded = (path as NSString).expandingTildeInPath
             let absolute = expanded.hasPrefix("/") ? expanded : FileManager.default.currentDirectoryPath + "/" + expanded
-            entry.state.createWorkspace(rootPath: (absolute as NSString).standardizingPath, customName: r.string("name"))
+            var host = r.string("host") ?? ""
+            if ["local", "none", "-"].contains(host) { host = "" }
+            if let error = entry.state.createWorkspace(rootPath: (absolute as NSString).standardizingPath, customName: r.string("name"), remoteHost: host) { throw fail(error) }
             guard let ws = entry.state.selectedWorkspace else { throw fail("workspace not created") }
             return describe(ws, in: entry)
 
@@ -91,7 +93,7 @@ enum ControlCommands {
             let (entry, ws) = try workspace(r)
             var host = r.string("host") ?? ""
             if host == "none" || host == "local" || host == "-" { host = "" }
-            entry.state.setRemoteHost(ws, to: host)
+            if let error = entry.state.setRemoteHost(ws, to: host) { throw fail(error) }
             return describe(try refetch(ws, in: entry), in: entry)
 
         case "ws.move":

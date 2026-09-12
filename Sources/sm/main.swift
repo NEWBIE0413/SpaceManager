@@ -15,7 +15,7 @@ sm — SpaceManager를 터미널에서 조작한다
   sm window appearance <win> <light|dark|system>
 
   sm ws [list]                        워크스페이스 목록 (모든 창)
-  sm ws add <path> [--name N]         워크스페이스 추가
+  sm ws add <path> [--name N] [--host arch|local]  실행 위치를 지정해 추가
   sm ws select|delete <ws>            선택(창 앞으로)/삭제
   sm ws rename <ws> <name>            이름 변경 (빈 문자열이면 폴더명)
   sm ws tmux-name <ws> <name>         tmux 세션명
@@ -87,7 +87,7 @@ while i < argv.count {
     case "--no-focus": noFocus = true
     case "-w", "--window": i += 1; windowArg = i < argv.count ? argv[i] : nil
     case "--quick", "--proxy": flags[String(a.dropFirst(2))] = "true"
-    case "--name", "--model", "--effort", "-n", "--limit":
+    case "--name", "--host", "--model", "--effort", "-n", "--limit":
         i += 1; flags[a.hasPrefix("--") ? String(a.dropFirst(2)) : "limit"] = i < argv.count ? argv[i] : ""
     case "-h", "--help", "help": print(usage); exit(0)
     default: positional.append(a)
@@ -117,7 +117,10 @@ do {
     case ("window", "appearance"):
         let a = try need(2, "sm window appearance <win> <light|dark|system>"); command = "window.appearance"; args["window"] = a[0]; args["value"] = a[1]
     case ("ws", nil), ("ws", "list"), ("workspaces", _): command = "ws.list"
-    case ("ws", "add"): command = "ws.add"; args["path"] = try need(1, "sm ws add <path>")[0]; if let n = flags["name"] { args["name"] = n }
+    case ("ws", "add"):
+        command = "ws.add"; args["path"] = try need(1, "sm ws add <path> [--host arch|local]")[0]
+        if let n = flags["name"] { args["name"] = n }
+        if let host = flags["host"] { args["host"] = host }
     case ("ws", "select"), ("ws", "delete"): command = "ws.\(sub!)"; args["ws"] = try need(1, "sm ws \(sub!) <ws>")[0]
     case ("ws", "rename"): let a = try need(1, "sm ws rename <ws> <name>"); command = "ws.rename"; args["ws"] = a[0]; args["name"] = a.count > 1 ? a[1] : ""
     case ("ws", "tmux-name"): let a = try need(1, "sm ws tmux-name <ws> <name>"); command = "ws.tmuxName"; args["ws"] = a[0]; args["name"] = a.count > 1 ? a[1] : ""

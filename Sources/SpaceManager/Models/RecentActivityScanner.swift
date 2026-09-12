@@ -37,6 +37,9 @@ final class RecentActivityScanner: ObservableObject {
     @Published private(set) var workspaceActivity: [String: Date] = [:]
     /// 지금 transcript가 자라고 있는 cwd들
     @Published private(set) var generatingDirectories: Set<String> = []
+    /// Empty host means this Mac. Keep the legacy aggregate for CLI consumers.
+    @Published private(set) var workspaceActivityByHost: [String: [String: Date]] = [:]
+    @Published private(set) var generatingDirectoriesByHost: [String: Set<String>] = [:]
 
     /// 아일랜드의 "최근" — 지난 1시간
     static let islandWindow: TimeInterval = 3600
@@ -217,6 +220,12 @@ final class RecentActivityScanner: ObservableObject {
         Self.merge(records: remoteResult.records, into: &result)
         if sessions != result.sessions { sessions = result.sessions }
         if workspaceActivity != result.activityByCwd { workspaceActivity = result.activityByCwd }
+        var byHost = ["": localResult.activityByCwd]
+        for record in remoteResult.records {
+            let host = record.host ?? ""
+            byHost[host, default: [:]][record.cwd] = max(byHost[host]?[record.cwd] ?? .distantPast, record.lastActivity)
+        }
+        if workspaceActivityByHost != byHost { workspaceActivityByHost = byHost }
         generatingIndex.entries = generatingIndex.entries.filter { !$0.key.hasPrefix("remote/") }
             .merging(remoteResult.generating) { _, new in new }
         publishGenerating()
@@ -268,6 +277,8 @@ final class RecentActivityScanner: ObservableObject {
         let now = Date()
         let generating = generatingIndex.directories(now: now)
         if generatingDirectories != generating { generatingDirectories = generating }
+        let byHost = generatingIndex.directoriesByHost(now: now)
+        if generatingDirectoriesByHost != byHost { generatingDirectoriesByHost = byHost }
         expirationTimer?.invalidate()
         expirationTimer = nil
         guard isVisible, let expiration = generatingIndex.nextExpiration(now: now) else { return }

@@ -83,13 +83,13 @@ final class WorkspaceWindowRegistry: ObservableObject {
         return entries.compactMap { entry in entry.state.map { ($0, entry.window) } }
     }
 
-    func canJump(to cwd: String, preferredState: AppState) -> Bool {
-        target(for: cwd, preferredState: preferredState) != nil
+    func canJump(to cwd: String, host: String? = nil, preferredState: AppState) -> Bool {
+        target(for: cwd, host: host, preferredState: preferredState) != nil
     }
 
     @discardableResult
-    func jump(to cwd: String, preferredState: AppState) -> Bool {
-        guard let target = target(for: cwd, preferredState: preferredState),
+    func jump(to cwd: String, host: String? = nil, preferredState: AppState) -> Bool {
+        guard let target = target(for: cwd, host: host, preferredState: preferredState),
               let state = target.entry.state,
               let window = target.entry.window else { return false }
         if window.isMiniaturized { window.deminiaturize(nil) }
@@ -118,10 +118,12 @@ final class WorkspaceWindowRegistry: ObservableObject {
     /// 가로채지 않는다.
     static func bestRoute<Owner: Equatable>(
         containing cwd: String,
+        host: String? = nil,
         candidates: [(owner: Owner, workspace: Workspace)],
         preferredOwner: Owner
     ) -> (owner: Owner, workspace: Workspace)? {
         candidates
+            .filter { ($0.workspace.remoteHost ?? "") == (host ?? "") }
             .filter { cwd == $0.workspace.rootPath || cwd.hasPrefix($0.workspace.rootPath + "/") }
             .max { lhs, rhs in
                 if lhs.workspace.rootPath.count != rhs.workspace.rootPath.count {
@@ -131,7 +133,7 @@ final class WorkspaceWindowRegistry: ObservableObject {
             }
     }
 
-    private func target(for cwd: String, preferredState: AppState) -> (entry: Entry, workspace: Workspace)? {
+    private func target(for cwd: String, host: String?, preferredState: AppState) -> (entry: Entry, workspace: Workspace)? {
         removeDeadEntries()
         let candidates = entries.flatMap { entry -> [(owner: ObjectIdentifier, workspace: Workspace)] in
             guard let state = entry.state, entry.window != nil else { return [] }
@@ -140,6 +142,7 @@ final class WorkspaceWindowRegistry: ObservableObject {
         }
         guard let route = Self.bestRoute(
             containing: cwd,
+            host: host,
             candidates: candidates,
             preferredOwner: ObjectIdentifier(preferredState)
         ), let entry = entries.first(where: {

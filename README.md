@@ -133,8 +133,21 @@ When the router is unavailable, the session-based window keeps the direct Claude
 ## Remote workspaces
 
 A workspace can point its tmux server at another machine. Set an ssh host
-alias from the workspace's context menu (**Set Remote Host...**) or with
-`sm ws remote <ws> <host>`; `none` switches back to local tmux.
+alias by clicking the small **computer / server icon** beside a workspace name.
+The icon appears only while its row is selected or hovered. Choose **이 Mac**
+for native macOS work, **아치 · arch** for the Arch computer, or **다른 SSH 호스트…**
+for another configured SSH alias. The same choices are in the context menu under
+**실행 위치**. The CLI remains `sm ws remote <ws> <host>`; `none` selects this Mac.
+
+Each workspace keeps its own destination, so local Xcode projects and remote agents
+can share the same app window. Changing the destination does not copy project files.
+A missing Mac checkout blocks switching to local and leaves the current tabs connected.
+Activity dots and island navigation follow both the project path and its host.
+
+The **+ / New Workspace** sheet also offers **이 Mac / 아치 / 다른 호스트** before
+creating the first tab. Remote folders can be entered as `~/myworld/project`
+without creating a local copy. The equivalent CLI is
+`sm ws add ~/myworld/project --name project --host arch` (or `--host local`).
 
 - The tab runs `ssh -t <host>` and attaches to the tmux session of the same
   name on that host, creating it there when it does not exist. The remote

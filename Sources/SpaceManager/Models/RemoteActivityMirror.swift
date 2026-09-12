@@ -76,7 +76,7 @@ enum RemoteActivityMirror {
                 snippet: record.snippet, growingFile: nil, host: host
             ))
             if fresh {
-                result.generating["remote/\(id)"] = .init(cwd: cwd, modified: record.modified.addingTimeInterval(skew))
+                result.generating["remote/\(id)"] = .init(cwd: cwd, modified: record.modified.addingTimeInterval(skew), host: host)
             }
         }
         return result

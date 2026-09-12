@@ -6,14 +6,23 @@ struct GeneratingActivityIndex {
     struct Entry: Equatable {
         let cwd: String
         let modified: Date
+        var host: String? = nil
     }
     var entries: [String: Entry] = [:]
 
     func directories(now: Date = Date()) -> Set<String> {
-        Set(entries.values.compactMap {
-            let age = now.timeIntervalSince($0.modified)
-            return age >= 0 && age <= RecentActivityScanner.generatingWindow ? $0.cwd : nil
-        })
+        Set(directoriesByHost(now: now).values.flatMap { $0 })
+    }
+
+    func directoriesByHost(now: Date = Date()) -> [String: Set<String>] {
+        var result: [String: Set<String>] = [:]
+        for entry in entries.values {
+            let age = now.timeIntervalSince(entry.modified)
+            if age >= 0 && age <= RecentActivityScanner.generatingWindow {
+                result[entry.host ?? "", default: []].insert(entry.cwd)
+            }
+        }
+        return result
     }
 
     func nextExpiration(now: Date = Date()) -> Date? {

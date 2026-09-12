@@ -189,10 +189,15 @@ class AppState: ObservableObject {
 
     // MARK: - Workspace Management
 
-    func createWorkspace(rootPath: String, customName: String? = nil) {
-        let workspace = Workspace(rootPath: rootPath, customName: customName)
+    @discardableResult
+    func createWorkspace(rootPath: String, customName: String? = nil, remoteHost: String? = nil) -> String? {
+        let path = ((rootPath.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).expandingTildeInPath as NSString).standardizingPath
+        let host = remoteHost?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let workspace = Workspace(rootPath: path, customName: customName, remoteHost: host?.isEmpty == false ? host : nil)
+        if let error = workspace.executionLocationError(host: workspace.remoteHost) { return error }
         workspaces.append(workspace)
         selectWorkspace(workspace)
+        return nil
     }
 
     private func workspaceIndex(id: UUID) -> Int? {
@@ -243,11 +248,13 @@ class AppState: ObservableObject {
     }
 
     /// 원격 호스트 변경. 탭은 detach만 되고 tmux 세션은 어느 쪽 머신에서든 무손실.
-    func setRemoteHost(_ workspace: Workspace, to raw: String) {
-        guard let index = workspaceIndex(id: workspace.id) else { return }
+    @discardableResult
+    func setRemoteHost(_ workspace: Workspace, to raw: String) -> String? {
+        guard let index = workspaceIndex(id: workspace.id) else { return "워크스페이스를 찾을 수 없습니다." }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let host = trimmed.isEmpty ? nil : trimmed
-        guard workspaces[index].remoteHost != host else { return }
+        guard workspaces[index].remoteHost != host else { return nil }
+        if let error = workspaces[index].executionLocationError(host: host) { return error }
         workspaces[index].remoteHost = host
         workspaces[index].updatedAt = Date()
         let ws = workspaces[index]
@@ -264,6 +271,7 @@ class AppState: ObservableObject {
             selectedSessionIdByWorkspace[ws.id] = selectedSession?.id
         }
         persistWindowState()
+        return nil
     }
 
     func deleteWorkspace(_ workspace: Workspace) {

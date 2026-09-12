@@ -12,7 +12,7 @@ struct WorkspaceListView: View {
 
     /// 이 워크스페이스(루트 및 하위 경로)에서의 마지막 Claude 대화 시각
     private func lastConversation(for workspace: Workspace) -> Date? {
-        activity.workspaceActivity
+        (activity.workspaceActivityByHost[workspace.remoteHost ?? ""] ?? [:])
             .filter { $0.key == workspace.rootPath || $0.key.hasPrefix(workspace.rootPath + "/") }
             .map(\.value)
             .max()
@@ -20,7 +20,7 @@ struct WorkspaceListView: View {
 
     /// 이 워크스페이스(루트 및 하위 경로)의 transcript가 지금 자라고 있는지
     private func isGenerating(_ workspace: Workspace) -> Bool {
-        activity.generatingDirectories.contains {
+        (activity.generatingDirectoriesByHost[workspace.remoteHost ?? ""] ?? []).contains {
             $0 == workspace.rootPath || $0.hasPrefix(workspace.rootPath + "/")
         }
     }
@@ -45,7 +45,8 @@ struct WorkspaceListView: View {
                         isGenerating: isGenerating(workspace),
                         animation: animation,
                         onAddShellTab: { appState.selectWorkspace(workspace); appState.addShellTab() },
-                        onAddTmuxTab: { appState.selectWorkspace(workspace); appState.addTmuxTab() }
+                        onAddTmuxTab: { appState.selectWorkspace(workspace); appState.addTmuxTab() },
+                        onChangeHost: { changeHost(workspace, to: $0) }
                     )
                     .onTapGesture {
                         appState.selectWorkspace(workspace)
@@ -100,19 +101,8 @@ struct WorkspaceListView: View {
                                 appState.setTmuxSessionName(workspace, to: input.stringValue)
                             }
                         }
-                        Button("Set Remote Host...") {
-                            let alert = NSAlert()
-                            alert.messageText = "원격 호스트 (ssh 별칭)"
-                            alert.informativeText = "~/.ssh/config의 Host 이름. 비워두면 로컬 tmux. 원격에서는 같은 홈 상대경로(\(workspace.remoteDirectory.shellExpression))를 쓴다."
-                            alert.addButton(withTitle: "저장")
-                            alert.addButton(withTitle: "취소")
-                            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 22))
-                            input.stringValue = workspace.remoteHost ?? ""
-                            input.placeholderString = "arch"
-                            alert.accessoryView = input
-                            if alert.runModal() == .alertFirstButtonReturn {
-                                appState.setRemoteHost(workspace, to: input.stringValue)
-                            }
+                        Menu("실행 위치") {
+                            WorkspaceHostChoices(workspace: workspace) { changeHost(workspace, to: $0) }
                         }
                         Divider()
                         Button("Delete", role: .destructive) {
@@ -150,6 +140,55 @@ struct WorkspaceListView: View {
         }
         .animation(reduceMotion ? nil : Sidebar.selectionAnimation, value: appState.selectedWorkspace?.id)
         .animation(reduceMotion ? nil : Sidebar.selectionAnimation, value: appState.selectedSession?.id)
+    }
+
+    private func changeHost(_ workspace: Workspace, to host: String) {
+        if let error = appState.setRemoteHost(workspace, to: host) {
+            let alert = NSAlert()
+            alert.messageText = "실행 위치를 변경할 수 없습니다"
+            alert.informativeText = error
+            alert.runModal()
+        }
+    }
+}
+
+/// The personal setup has two usual destinations; other SSH aliases remain
+/// available through the editor. Add host discovery if more saved hosts are needed.
+struct WorkspaceHostChoices: View {
+    let workspace: Workspace
+    let onChange: (String) -> Void
+
+    var body: some View {
+        hostButton("이 Mac", host: "")
+        hostButton("아치 · arch", host: "arch")
+        if let host = workspace.remoteHost, !host.isEmpty, host != "arch" {
+            hostButton(host, host: host)
+        }
+        Divider()
+        Button("다른 SSH 호스트…") {
+            let alert = NSAlert()
+            alert.messageText = "실행할 SSH 호스트"
+            alert.informativeText = "SSH 설정의 호스트 별칭을 입력하세요. 원격 작업 폴더는 \(workspace.remoteDirectory.shellExpression)입니다. 파일은 자동으로 복사되지 않습니다."
+            alert.addButton(withTitle: "연결")
+            alert.addButton(withTitle: "취소")
+            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 22))
+            input.stringValue = workspace.remoteHost ?? ""
+            input.placeholderString = "arch"
+            alert.accessoryView = input
+            if alert.runModal() == .alertFirstButtonReturn { onChange(input.stringValue) }
+        }
+        Divider()
+        Text("실행 위치만 변경 · 파일 자동 이전 없음")
+    }
+
+    private func hostButton(_ title: String, host: String) -> some View {
+        Button { onChange(host) } label: {
+            if (workspace.remoteHost ?? "") == host {
+                Label(title, systemImage: "checkmark")
+            } else {
+                Text(title)
+            }
+        }
     }
 }
 
@@ -313,6 +352,7 @@ struct WorkspaceRow: View {
     let animation: Namespace.ID
     var onAddShellTab: (() -> Void)?
     var onAddTmuxTab: (() -> Void)?
+    var onChangeHost: ((String) -> Void)?
     @State private var isHovering = false
 
     var body: some View {
@@ -331,16 +371,6 @@ struct WorkspaceRow: View {
                             .font(.system(size: 13, weight: isSelected ? .bold : .medium))
                             .foregroundColor(isSelected ? .warmPinkMuted : .primary.opacity(0.9))
                             .lineLimit(1)
-                        if workspace.isRemote {
-                            // 원격 워크스페이스 표식 — 이 탭의 tmux는 다른 머신에 있다
-                            Text(workspace.remoteHost ?? "")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundColor(.secondary)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(Capsule().fill(Color.white.opacity(0.10)))
-                                .help("Remote tmux on \(workspace.remoteHost ?? "")")
-                        }
                     }
 
                     if isSelected {
@@ -355,6 +385,22 @@ struct WorkspaceRow: View {
                 Spacer(minLength: 0)
 
                 WorkspaceActivityDot(lastConversation: lastConversation, isGenerating: isGenerating)
+
+                Menu {
+                    WorkspaceHostChoices(workspace: workspace) { onChangeHost?($0) }
+                } label: {
+                    Image(systemName: workspace.isRemote ? "server.rack" : "laptopcomputer")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.secondary.opacity(0.8))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: 16)
+                .accessibilityLabel("실행 위치: \(workspace.isRemote ? workspace.remoteHost ?? "" : "이 Mac")")
+                .help("실행 위치: \(workspace.isRemote ? workspace.remoteHost ?? "" : "이 Mac")")
+                .opacity(isSelected || isHovering ? 1 : 0)
+                .allowsHitTesting(isSelected || isHovering)
+                .accessibilityHidden(!(isSelected || isHovering))
 
                 // 자리를 항상 확보하고 투명도로만 나타낸다 (호버 출렁임 방지)
                 Menu {

@@ -169,6 +169,9 @@ struct NewWorkspaceSheet: View {
     @EnvironmentObject var appState: AppState
     @State private var path = ""
     @State private var customName = ""
+    @State private var destination = "local"
+    @State private var customHost = ""
+    @State private var creationError: String?
     @Environment(\.dismiss) var dismiss
 
     var folderName: String {
@@ -180,17 +183,31 @@ struct NewWorkspaceSheet: View {
             Text("New Workspace")
                 .font(.headline)
 
+            Picker("실행 위치", selection: $destination) {
+                Text("이 Mac").tag("local")
+                Text("아치").tag("arch")
+                Text("다른 호스트").tag("other")
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 360)
+
+            if destination == "other" {
+                TextField("SSH 호스트 별칭", text: $customHost)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 360)
+            }
+
             VStack(alignment: .leading, spacing: 8) {
-                Text("Select Folder")
+                Text(destination == "local" ? "Mac 작업 폴더" : "원격 작업 폴더")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
                 HStack {
-                    TextField("Folder Path", text: $path)
+                    TextField(destination == "local" ? "Folder Path" : "~/myworld/project", text: $path)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 280)
 
-                    Button("Browse...") {
+                    if destination == "local" { Button("Browse...") {
                         let panel = NSOpenPanel()
                         panel.canChooseFiles = false
                         panel.canChooseDirectories = true
@@ -200,7 +217,15 @@ struct NewWorkspaceSheet: View {
                         if panel.runModal() == .OK, let url = panel.url {
                             path = url.path
                         }
-                    }
+                    } }
+                }
+
+                if destination != "local" {
+                    Text("해당 호스트에 있는 폴더 경로를 입력하세요. 파일은 자동으로 이전되지 않습니다.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(width: 360, alignment: .leading)
                 }
 
                 if !path.isEmpty {
@@ -214,6 +239,11 @@ struct NewWorkspaceSheet: View {
                 }
             }
 
+            if let creationError {
+                Text(creationError).font(.caption).foregroundColor(.red)
+                    .frame(width: 360, alignment: .leading)
+            }
+
             HStack {
                 Button("Cancel") {
                     dismiss()
@@ -222,15 +252,16 @@ struct NewWorkspaceSheet: View {
 
                 Button("Create") {
                     if !path.isEmpty {
-                        appState.createWorkspace(
+                        creationError = appState.createWorkspace(
                             rootPath: path,
-                            customName: customName.isEmpty ? nil : customName
+                            customName: customName.isEmpty ? nil : customName,
+                            remoteHost: destination == "local" ? nil : (destination == "arch" ? "arch" : customHost)
                         )
-                        dismiss()
+                        if creationError == nil { dismiss() }
                     }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(path.isEmpty)
+                .disabled(path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (destination == "other" && customHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
             }
         }
         .padding(30)
