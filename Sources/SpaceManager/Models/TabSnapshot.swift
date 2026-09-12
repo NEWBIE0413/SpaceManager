@@ -19,6 +19,8 @@ struct TabSnapshot: Codable, Identifiable {
     var name: String
     var workingDirectory: String
     var tmuxSessionName: String?
+    /// nil이면 로컬. 구 JSON에는 없는 필드 — 기본값으로 로드된다.
+    var remoteHost: String? = nil
 }
 
 /// 한 창에서 특정 워크스페이스에 열려 있던 탭 구성

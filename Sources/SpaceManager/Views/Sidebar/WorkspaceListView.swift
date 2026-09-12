@@ -100,6 +100,20 @@ struct WorkspaceListView: View {
                                 appState.setTmuxSessionName(workspace, to: input.stringValue)
                             }
                         }
+                        Button("Set Remote Host...") {
+                            let alert = NSAlert()
+                            alert.messageText = "원격 호스트 (ssh 별칭)"
+                            alert.informativeText = "~/.ssh/config의 Host 이름. 비워두면 로컬 tmux. 원격에서는 같은 홈 상대경로(\(workspace.remoteDirectory.shellExpression))를 쓴다."
+                            alert.addButton(withTitle: "저장")
+                            alert.addButton(withTitle: "취소")
+                            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 22))
+                            input.stringValue = workspace.remoteHost ?? ""
+                            input.placeholderString = "arch"
+                            alert.accessoryView = input
+                            if alert.runModal() == .alertFirstButtonReturn {
+                                appState.setRemoteHost(workspace, to: input.stringValue)
+                            }
+                        }
                         Divider()
                         Button("Delete", role: .destructive) {
                             appState.deleteWorkspace(workspace)
@@ -312,10 +326,22 @@ struct WorkspaceRow: View {
                 // 경로 부제는 선택된 행에만 — 호버로 행 높이가 변하면 목록 전체가 출렁인다.
                 // 다른 행의 경로는 툴팁(.help)으로 확인.
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(workspace.name)
-                        .font(.system(size: 13, weight: isSelected ? .bold : .medium))
-                        .foregroundColor(isSelected ? .warmPinkMuted : .primary.opacity(0.9))
-                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text(workspace.name)
+                            .font(.system(size: 13, weight: isSelected ? .bold : .medium))
+                            .foregroundColor(isSelected ? .warmPinkMuted : .primary.opacity(0.9))
+                            .lineLimit(1)
+                        if workspace.isRemote {
+                            // 원격 워크스페이스 표식 — 이 탭의 tmux는 다른 머신에 있다
+                            Text(workspace.remoteHost ?? "")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Color.white.opacity(0.10)))
+                                .help("Remote tmux on \(workspace.remoteHost ?? "")")
+                        }
+                    }
 
                     if isSelected {
                         Text(workspace.rootPath.replacingOccurrences(of: NSHomeDirectory(), with: "~"))

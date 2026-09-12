@@ -21,6 +21,10 @@ let package = Package(
                 .copy("Terminal/Resources")
             ]
         ),
+        .executableTarget(
+            name: "sm",
+            path: "Sources/sm"
+        ),
         .testTarget(
             name: "SpaceManagerTests",
             dependencies: ["SpaceManager"],

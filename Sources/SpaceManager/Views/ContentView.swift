@@ -154,6 +154,7 @@ struct ContentView: View {
                 RecentActivityScanner.shared.start(owner: appState.windowStateId)
             }
             WindowRestorer.openRemainingWindowsIfNeeded(openWindow)
+            WindowOpener.register(openWindow)   // CLI(window.new / quick.new)가 창을 열 수 있게
         }
         .onDisappear {
             if windowKind == .workspace, !appState.shouldCloseOnAppearance {

@@ -130,6 +130,77 @@ Stop it with:
 
 When the router is unavailable, the session-based window keeps the direct Claude model choices and disables proxy-only choices.
 
+## Remote workspaces
+
+A workspace can point its tmux server at another machine. Set an ssh host
+alias from the workspace's context menu (**Set Remote Host...**) or with
+`sm ws remote <ws> <host>`; `none` switches back to local tmux.
+
+- The tab runs `ssh -t <host>` and attaches to the tmux session of the same
+  name on that host, creating it there when it does not exist. The remote
+  script uses the same cold-boot patience as local tmux so it never steals a
+  session name that `tmux-continuum` is about to restore.
+- Paths under the local home are translated to the remote `$HOME`
+  (`/Users/me/myworld/x` → `$HOME/myworld/x`), so the same folder layout on
+  both machines needs no per-workspace configuration. Paths outside the home
+  are sent unchanged.
+- Changing the host detaches the workspace's tabs and re-attaches them; tmux
+  sessions on either machine are untouched.
+- Remote workspaces show the host as a small badge in the sidebar and do not
+  need a local tmux install.
+
+The ssh alias comes from `~/.ssh/config`; a `ProxyCommand` that picks the
+route (VPN or LAN) works transparently, and `ControlMaster` keeps reconnects
+cheap.
+
+## sm CLI
+
+Everything the app can do is also available from the terminal. The app opens a
+line-delimited JSON control socket at `~/.space-manager/control.sock`, and
+`sm` (`swift build -c release` → `.build/release/sm`, installed as `~/bin/sm`)
+sends one request per connection. When the app is not running, `sm` launches
+it and waits for the socket.
+
+```text
+sm windows                          창 목록
+sm window new [--quick]             새 창 (워크스페이스/Quick)
+sm window focus|close <win>         창 앞으로/닫기
+sm window appearance <win> <light|dark|system>
+
+sm ws [list]                        워크스페이스 목록 (모든 창)
+sm ws add <path> [--name N]         워크스페이스 추가
+sm ws select|delete <ws>            선택(창 앞으로)/삭제
+sm ws rename <ws> <name>            이름 변경 (빈 문자열이면 폴더명)
+sm ws tmux-name <ws> <name>         tmux 세션명
+sm ws remote <ws> <host|none>       원격 호스트 (ssh 별칭) — tmux를 그 머신에서
+sm ws move <ws> <index>             순서 이동
+sm project add|remove <ws> <path>   추가 프로젝트 폴더
+
+sm tabs [ws]                        탭 목록
+sm tab shell|tmux [ws]              탭 추가
+sm tab select|close <tab>           탭 선택/닫기
+sm tab next|prev
+
+sm quick [list] [-n N]              최근 Claude 대화
+sm quick new [--model M] [--effort E] [--proxy] [prompt…]
+sm quick resume <session-id>
+sm quick home
+
+sm activity                         에이전트 활동 (transcript 기반)
+sm state                            window-states.json 덤프
+sm ping
+```
+
+Options: `--json` prints the raw response, `-w/--window <id|index|front>`
+picks the window, `--no-focus` leaves the app in the background. `<ws>` is a
+name, tmux session name, path, or id prefix; `<tab>` is a name, index, or id
+prefix; `<win>` is an index, id prefix, or `front`.
+
+The protocol is `{"command":"ws.select","args":{"ws":"flat"}}\n` →
+`{"ok":true,"result":{…}}\n` or `{"ok":false,"error":"…"}\n`. The app-side
+router lives in `Sources/SpaceManager/Control/`; a new UI feature gets its
+command in the same commit.
+
 ## Credits
 
 - Demo recorded with [OpenScreen](https://github.com/siddharthvaddem/openscreen).

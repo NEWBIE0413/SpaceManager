@@ -242,6 +242,26 @@ class AppState: ObservableObject {
         persistWindowState()
     }
 
+    /// 원격 호스트 변경. 탭은 detach만 되고 tmux 세션은 어느 쪽 머신에서든 무손실.
+    func setRemoteHost(_ workspace: Workspace, to raw: String) {
+        guard let index = workspaceIndex(id: workspace.id) else { return }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        workspaces[index].remoteHost = trimmed.isEmpty ? nil : trimmed
+        workspaces[index].updatedAt = Date()
+        let ws = workspaces[index]
+        if selectedWorkspace?.id == ws.id {
+            selectedWorkspace = ws
+        }
+        // 호스트가 바뀌면 이 워크스페이스의 모든 탭을 다시 붙여야 한다
+        for session in sessionsByWorkspace[ws.id] ?? [] { session.cleanup() }
+        sessionsByWorkspace[ws.id] = []
+        if selectedWorkspace?.id == ws.id {
+            ensureSessions(for: ws)
+            selectedSessionIdByWorkspace[ws.id] = selectedSession?.id
+        }
+        persistWindowState()
+    }
+
     func deleteWorkspace(_ workspace: Workspace) {
         workspaces.removeAll { $0.id == workspace.id }
         if let sessions = sessionsByWorkspace[workspace.id] {
@@ -305,8 +325,9 @@ class AppState: ObservableObject {
         guard let workspace = selectedWorkspace else { return }
         let session = TerminalSession(
             kind: .shell,
-            name: "zsh",
-            workingDirectory: workspace.rootPath
+            name: workspace.isRemote ? "shell@\(workspace.remoteHost ?? "")" : "zsh",
+            workingDirectory: workspace.rootPath,
+            remoteHost: workspace.remoteHost
         )
         appendAndSelect(session, in: workspace)
     }
@@ -376,14 +397,16 @@ class AppState: ObservableObject {
             kind: .tmuxExtra,
             name: sessionName,
             workingDirectory: workspace.rootPath,
-            tmuxSessionName: sessionName
+            tmuxSessionName: sessionName,
+            remoteHost: workspace.remoteHost
         )
         appendAndSelect(session, in: workspace)
     }
 
     private func makeMainTab(for workspace: Workspace) -> TerminalSession {
-        // tmux가 없으면 메인 탭도 순수 셸로 폴백 (배너는 TerminalAreaView가 표시)
-        guard TmuxBootstrap.isTmuxAvailable else {
+        // tmux가 없으면 메인 탭도 순수 셸로 폴백 (배너는 TerminalAreaView가 표시).
+        // 원격 워크스페이스는 로컬 tmux가 필요 없다 — 서버가 저쪽에 있다.
+        guard TmuxBootstrap.isTmuxAvailable || workspace.isRemote else {
             return TerminalSession(kind: .shell, name: "zsh", workingDirectory: workspace.rootPath)
         }
         let sessionName = workspace.effectiveTmuxSessionName
@@ -391,8 +414,15 @@ class AppState: ObservableObject {
             kind: .tmuxMain,
             name: sessionName,
             workingDirectory: workspace.rootPath,
-            tmuxSessionName: sessionName
+            tmuxSessionName: sessionName,
+            remoteHost: workspace.remoteHost
         )
+    }
+
+    /// 선택되지 않은 워크스페이스의 탭도 CLI가 나열할 수 있게 한다 (읽기 전용).
+    func sessions(for workspace: Workspace) -> [TerminalSession] {
+        if selectedWorkspace?.id == workspace.id { return sessions }
+        return sessionsByWorkspace[workspace.id] ?? []
     }
 
     private func appendAndSelect(_ session: TerminalSession, in workspace: Workspace) {

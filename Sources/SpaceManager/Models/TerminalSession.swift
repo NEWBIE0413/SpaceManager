@@ -20,6 +20,8 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     var workingDirectory: String
     /// tmuxMain/tmuxExtra가 attach할 세션명 (shell이면 nil)
     let tmuxSessionName: String?
+    /// ssh 호스트 별칭. 설정되면 tmux 서버(또는 셸)가 그 호스트에서 돈다.
+    let remoteHost: String?
     let quickLaunch: QuickLaunch?
     let quickConfiguration: QuickSessionConfiguration
     private let initialName: String
@@ -34,6 +36,7 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
 
     init(id: UUID = UUID(), kind: TabKind, name: String,
          workingDirectory: String, tmuxSessionName: String? = nil,
+         remoteHost: String? = nil,
          quickLaunch: QuickLaunch? = nil,
          quickConfiguration: QuickSessionConfiguration = .default) {
         self.id = id
@@ -42,6 +45,7 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
         self.initialName = name
         self.workingDirectory = workingDirectory
         self.tmuxSessionName = tmuxSessionName
+        self.remoteHost = remoteHost
         self.quickLaunch = quickLaunch
         self.quickConfiguration = quickConfiguration
         self.quickSessionId = quickLaunch?.resumeSessionId
@@ -99,6 +103,9 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
             kind: kind,
             tmuxSessionName: tmuxSessionName,
             workingDirectory: startDir,
+            remoteHost: remoteHost,
+            // 원격 디렉토리는 폴백 전 원래 경로에서 계산한다 — 로컬에 없어도 원격엔 있다.
+            remoteDirectory: TmuxBootstrap.remoteDirectory(forLocalPath: workingDirectory),
             quickLaunch: quickLaunch,
             quickConfiguration: quickConfiguration
         )
@@ -245,6 +252,8 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
         kind: TabKind,
         tmuxSessionName: String?,
         workingDirectory: String,
+        remoteHost: String? = nil,
+        remoteDirectory: TmuxBootstrap.RemoteDirectory? = nil,
         quickLaunch: QuickLaunch? = nil,
         quickConfiguration: QuickSessionConfiguration = .default
     ) -> [String] {
@@ -253,6 +262,15 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
                 for: quickLaunch ?? .blank,
                 configuration: quickConfiguration
             )]
+        }
+        // 원격: 로컬 셸은 ssh만 exec한다. tmux 콜드부트 판단은 원격 스크립트가 한다.
+        if let remoteHost, !remoteHost.trimmingCharacters(in: .whitespaces).isEmpty {
+            let dir = remoteDirectory ?? TmuxBootstrap.remoteDirectory(forLocalPath: workingDirectory)
+            if let tmuxSessionName {
+                let script = TmuxBootstrap.remoteStartupScript(sessionName: tmuxSessionName, remoteDirectory: dir)
+                return ["-lc", TmuxBootstrap.remoteLaunchCommand(host: remoteHost, remoteScript: script)]
+            }
+            return ["-lc", TmuxBootstrap.remoteShellCommand(host: remoteHost, remoteDirectory: dir)]
         }
         if let tmuxSessionName {
             return ["-lc", TmuxBootstrap.startupScript(
@@ -275,12 +293,14 @@ extension TerminalSession {
     convenience init(snapshot: TabSnapshot) {
         self.init(id: snapshot.id, kind: snapshot.kind, name: snapshot.name,
                   workingDirectory: snapshot.workingDirectory,
-                  tmuxSessionName: snapshot.tmuxSessionName)
+                  tmuxSessionName: snapshot.tmuxSessionName,
+                  remoteHost: snapshot.remoteHost)
     }
 
     func snapshot() -> TabSnapshot {
         TabSnapshot(id: id, kind: kind, name: name,
                     workingDirectory: workingDirectory,
-                    tmuxSessionName: tmuxSessionName)
+                    tmuxSessionName: tmuxSessionName,
+                    remoteHost: remoteHost)
     }
 }

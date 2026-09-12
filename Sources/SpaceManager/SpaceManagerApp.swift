@@ -6,9 +6,18 @@ enum AppTermination {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var controlServer: ControlServer?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        // `sm` CLI 제어 소켓. 실패해도 앱은 정상 동작한다 — CLI만 못 붙는다.
+        let server = ControlServer(path: ControlCommands.socketPath) { request, respond in
+            ControlCommands.handle(request, completion: respond)
+        }
+        do { try server.start(); controlServer = server } catch {
+            NSLog("control server unavailable: \(error)")
+        }
         // 라이트/다크는 창별(AppState.preferredAppearance → NSWindow.appearance) —
         // 전역 NSApp.appearance는 건드리지 않는다
     }
@@ -27,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        controlServer?.stop()
         WorkspaceWindowRegistry.shared.persistWindowPresentations()
         // 종료 시 AppState.deinit이 창 상태를 지우지 않도록 표시
         AppTermination.isTerminating = true

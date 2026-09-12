@@ -77,6 +77,12 @@ final class WorkspaceWindowRegistry: ObservableObject {
         }
     }
 
+    /// CLI용 — 살아 있는 창(AppState)과 그 NSWindow. 등록 순서 유지.
+    func liveEntries() -> [(state: AppState, window: NSWindow?)] {
+        removeDeadEntries()
+        return entries.compactMap { entry in entry.state.map { ($0, entry.window) } }
+    }
+
     func canJump(to cwd: String, preferredState: AppState) -> Bool {
         target(for: cwd, preferredState: preferredState) != nil
     }

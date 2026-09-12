@@ -101,8 +101,13 @@ enum TmuxBootstrap {
     /// 4) 저장본에 이 세션명이 있으면 60초까지 생성하지 않는다 — 복원이 채울
     ///    이름을 앱이 가로채는 게 사고의 본질이었다. 없으면 신규이니 짧게 대기 후 생성.
     static func coldBootScript(sessionName: String, workingDirectory: String, birther: Bool) -> String {
+        coldBootScript(sessionName: sessionName, directoryExpression: workingDirectory.shQuoted, birther: birther)
+    }
+
+    /// `directoryExpression`은 이미 셸-안전한 표현식이다 (예: `'/tmp/x'` 또는 `"$HOME/"'proj'`).
+    static func coldBootScript(sessionName: String, directoryExpression: String, birther: Bool) -> String {
         let name = sessionName.shQuoted
-        let dir = workingDirectory.shQuoted
+        let dir = directoryExpression
         let birthBlock = birther ? """
         if [ ! -S "$SOCK" ]; then
           tmux new-session -d -s __sm_boot -c \(dir) 2>/dev/null &
@@ -155,6 +160,65 @@ enum TmuxBootstrap {
         tmux has-session -t \(name) 2>/dev/null || tmux new-session -d -s \(name) -c \(dir)
         \(cleanupLine)exec tmux attach-session -t \(name)
         """
+    }
+
+    // MARK: - 원격 호스트 (tmux 서버가 다른 머신에 있을 때)
+
+    /// 원격 작업 디렉토리. 로컬 홈 아래 경로는 원격 `$HOME` 기준으로 옮긴다 — 두 머신의
+    /// 홈 경로가 다르므로(/Users vs /home) 절대경로를 그대로 보내면 없는 디렉토리가 된다.
+    enum RemoteDirectory: Equatable {
+        case relativeToHome(String)
+        case absolute(String)
+
+        /// 원격 셸이 해석할 표현식. 홈 상대경로는 `"$HOME/"'rel'`로 만들어 `$HOME`만 확장되고
+        /// 나머지는 인용된 채 남는다.
+        var shellExpression: String {
+            switch self {
+            case .relativeToHome(let rel): return "\"$HOME/\"" + rel.shQuoted
+            case .absolute(let abs): return abs.shQuoted
+            }
+        }
+    }
+
+    static func remoteDirectory(forLocalPath path: String, localHome: String = NSHomeDirectory()) -> RemoteDirectory {
+        let home = localHome.hasSuffix("/") ? String(localHome.dropLast()) : localHome
+        if path == home { return .relativeToHome("") }
+        if path.hasPrefix(home + "/") {
+            return .relativeToHome(String(path.dropFirst(home.count + 1)))
+        }
+        return .absolute(path)
+    }
+
+    /// 원격에서 실행될 부트스트랩. 원격 서버의 소켓 유무는 여기서 알 수 없으므로 판단을
+    /// 스크립트 안으로 옮긴다: 서버가 있으면 즉시 attach/create, 없으면 로컬과 같은
+    /// 콜드 부트 인내 스크립트(continuum 복원을 가로채지 않기)로 내려간다.
+    static func remoteStartupScript(sessionName: String, remoteDirectory: RemoteDirectory) -> String {
+        let name = sessionName.shQuoted
+        let dir = remoteDirectory.shellExpression
+        let cold = coldBootScript(sessionName: sessionName, directoryExpression: "\"$WD\"", birther: true)
+        return """
+        WD=\(dir)
+        SOCK="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/default"
+        if [ -S "$SOCK" ]; then
+          tmux has-session -t \(name) 2>/dev/null || tmux new-session -d -s \(name) -c "$WD"
+          exec tmux attach-session -t \(name)
+        fi
+        \(cold)
+        """
+    }
+
+    /// 로컬 셸이 실행할 한 줄: `ssh -t host 'bash -lc <script>'`. `-t`로 원격에 pty를 주어
+    /// tmux가 붙을 수 있게 하고, keepalive로 슬립/네트워크 전환 시 죽은 세션을 빨리 정리한다.
+    static func remoteLaunchCommand(host: String, remoteScript: String) -> String {
+        let remoteCommand = "bash -lc " + remoteScript.shQuoted
+        return "exec ssh -t -o ServerAliveInterval=5 -o ServerAliveCountMax=3 "
+            + host.shQuoted + " -- " + remoteCommand.shQuoted
+    }
+
+    /// 원격 워크스페이스의 순수 셸 탭: 원격 디렉토리에서 로그인 셸.
+    static func remoteShellCommand(host: String, remoteDirectory: RemoteDirectory) -> String {
+        let script = "cd " + remoteDirectory.shellExpression + " 2>/dev/null; exec \"${SHELL:-bash}\" -l"
+        return remoteLaunchCommand(host: host, remoteScript: script)
     }
 
     /// tmux 바이너리 경로. 첫 접근 시 1회 평가 후 캐시.

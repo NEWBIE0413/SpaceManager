@@ -128,4 +128,71 @@ final class TmuxBootstrapTests: XCTestCase {
         ws.tmuxSessionName = "legacy-session"
         XCTAssertEqual(ws.effectiveTmuxSessionName, "legacy-session")
     }
+
+    // MARK: - 원격 호스트
+
+    func testRemoteDirectoryMapsLocalHomeToRemoteHome() {
+        XCTAssertEqual(TmuxBootstrap.remoteDirectory(forLocalPath: "/Users/me/myworld/flat", localHome: "/Users/me"),
+                       .relativeToHome("myworld/flat"))
+        XCTAssertEqual(TmuxBootstrap.remoteDirectory(forLocalPath: "/Users/me", localHome: "/Users/me"),
+                       .relativeToHome(""))
+        XCTAssertEqual(TmuxBootstrap.remoteDirectory(forLocalPath: "/srv/app", localHome: "/Users/me"),
+                       .absolute("/srv/app"))
+        XCTAssertEqual(TmuxBootstrap.RemoteDirectory.relativeToHome("a b/c").shellExpression, "\"$HOME/\"'a b/c'")
+    }
+
+    // 원격 스크립트: 서버가 있으면 warm attach, 없으면 콜드부트로 내려가되 마지막은 항상 attach
+    func testRemoteStartupScriptWarmThenColdFallback() {
+        let s = TmuxBootstrap.remoteStartupScript(sessionName: "flat", remoteDirectory: .relativeToHome("myworld/flat"))
+        XCTAssertTrue(s.contains("WD=\"$HOME/\"'myworld/flat'"))
+        XCTAssertTrue(s.contains("if [ -S \"$SOCK\" ]; then"))
+        XCTAssertTrue(s.contains("tmux new-session -d -s 'flat' -c \"$WD\""))
+        XCTAssertTrue(s.contains("__sm_boot"))
+        XCTAssertTrue(s.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("exec tmux attach-session -t 'flat'"))
+    }
+
+    func testRemoteLaunchCommandWrapsScriptInSshWithPty() {
+        let cmd = TmuxBootstrap.remoteLaunchCommand(host: "arch", remoteScript: "echo it's")
+        XCTAssertTrue(cmd.hasPrefix("exec ssh -t "))
+        XCTAssertTrue(cmd.contains(" 'arch' -- "))
+        XCTAssertTrue(cmd.contains("bash -lc "))
+        XCTAssertTrue(cmd.contains("'\"'\"'"))   // 중첩 인용이 깨지지 않는다
+    }
+
+    func testLaunchArgumentsUseSshForRemoteWorkspace() {
+        let args = TerminalSession.launchArguments(kind: .tmuxMain, tmuxSessionName: "flat",
+                                                   workingDirectory: "/nope", remoteHost: "arch",
+                                                   remoteDirectory: .relativeToHome("myworld/flat"))
+        XCTAssertEqual(args.first, "-lc")
+        XCTAssertTrue(args[1].hasPrefix("exec ssh -t "))
+        let shell = TerminalSession.launchArguments(kind: .shell, tmuxSessionName: nil,
+                                                    workingDirectory: "/nope", remoteHost: "arch",
+                                                    remoteDirectory: .absolute("/srv"))
+        // 원격 스크립트는 ssh 인자로 한 번 더 인용되므로 따옴표 형태가 아니라 내용으로 확인한다
+        XCTAssertTrue(shell[1].contains("cd ") && shell[1].contains("/srv") && shell[1].contains(" -l"))
+        // 로컬 경로는 원격 정보가 있어도 remoteHost가 nil이면 그대로 로컬 tmux
+        let local = TerminalSession.launchArguments(kind: .tmuxMain, tmuxSessionName: "x", workingDirectory: "/tmp")
+        XCTAssertFalse(local[1].contains("ssh"))
+    }
+
+    func testWorkspaceRemoteHostRoundTripsAndDefaultsToLocal() throws {
+        var ws = Workspace(rootPath: "/tmp/p", remoteHost: "arch")
+        XCTAssertTrue(ws.isRemote)
+        let data = try JSONEncoder().encode(ws)
+        let back = try JSONDecoder().decode(Workspace.self, from: data)
+        XCTAssertEqual(back.remoteHost, "arch")
+        ws.remoteHost = "  "
+        XCTAssertFalse(ws.isRemote)
+        let legacy = try JSONDecoder().decode(Workspace.self, from: data.replacingRemoteHost())
+        XCTAssertNil(legacy.remoteHost)
+    }
+}
+
+private extension Data {
+    /// 구 버전 JSON 시뮬레이션: remoteHost 키 제거
+    func replacingRemoteHost() -> Data {
+        var obj = try! JSONSerialization.jsonObject(with: self) as! [String: Any]
+        obj.removeValue(forKey: "remoteHost")
+        return try! JSONSerialization.data(withJSONObject: obj)
+    }
 }
