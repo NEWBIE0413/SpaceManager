@@ -156,3 +156,32 @@ final class QuickSessionTests: XCTestCase {
         XCTAssertFalse(blank.matchesQuickConversation(sessionId: UUID().uuidString))
     }
 }
+
+extension QuickSessionTests {
+    /// `ccv`는 이 저장소를 받은 사람에게 있을 이유가 없는 개인용 런처다.
+    /// 없을 때 `claude`를 직접 부르는 길이 맞는 플래그를 내보내는지 —
+    /// 이 기계에는 ccv가 있어서 그냥 두면 아무도 지나가지 않는 분기다.
+    func testLaunchesWithoutTheCcvWrapper() {
+        func command(_ launch: QuickLaunch) -> String {
+            QuickSessionPolicy.launchCommand(for: launch, usesWrapper: false)
+        }
+
+        XCTAssertTrue(command(.blank).contains("--dangerously-skip-permissions"))
+        XCTAssertFalse(command(.blank).contains(" -y "))
+
+        let resumed = command(.resume(sessionId: "x"))
+        XCTAssertTrue(resumed.contains("--resume \"$SM_RESUME_SESSION_ID\""))
+        XCTAssertFalse(resumed.contains("-ry"))
+
+        // 모델과 깊이는 양쪽 런처가 같은 이름으로 받는다.
+        for launch: QuickLaunch in [.blank, .initialPrompt("hi"), .resume(sessionId: "x")] {
+            XCTAssertTrue(command(launch).contains("--model \"$SM_MODEL\""), "\(launch)")
+            XCTAssertTrue(command(launch).contains("--effort \"$SM_EFFORT\""), "\(launch)")
+            // 승인 건너뛰기는 정확히 한 번.
+            XCTAssertEqual(
+                command(launch).components(separatedBy: "--dangerously-skip-permissions").count - 1, 1,
+                "\(launch): \(command(launch))"
+            )
+        }
+    }
+}

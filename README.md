@@ -61,7 +61,7 @@ The sidebar uses a behind-window `NSVisualEffectView`. The main canvas is opaque
 - `tmux`; `tmux-resurrect` and `tmux-continuum` are recommended for reboot recovery
 - Claude Code CLI
 
-This repository reflects a personal setup. The session-based window currently expects a `ccv` wrapper at `~/myworld/ccv` and uses `~/cld` for quick conversations. The optional Codex router is a separate sibling project at `~/myworld/claude-codex-router`. These paths must be adapted before treating the app as a general distribution.
+Quick conversations run Claude Code, found on your PATH. Their working directory is `~/cld`, which the app creates on first use. A local model router is optional — without it you get the models Claude Code itself offers.
 
 ### Build and run
 
