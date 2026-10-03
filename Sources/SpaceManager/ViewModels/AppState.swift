@@ -337,7 +337,7 @@ class AppState: ObservableObject {
         guard let workspace = selectedWorkspace else { return }
         let session = TerminalSession(
             kind: .shell,
-            name: workspace.isRemote ? "shell@\(workspace.remoteHost ?? "")" : "zsh",
+            name: TerminalSession.defaultShellName(remoteHost: workspace.remoteHost),
             workingDirectory: workspace.rootPath,
             remoteHost: workspace.remoteHost
         )
@@ -453,13 +453,25 @@ class AppState: ObservableObject {
         // 여기서 지우면 "지워졌다가 되살아나는" 유령 삭제가 된다. UI(WorkspaceTabRow)도
         // 메인 탭엔 ×를 숨기지만, 진입점이 늘어도 안전하도록 모델에서도 막는다.
         guard session.kind != .tmuxMain else { return }
-        session.cleanup()
-        sessions.removeAll { $0.id == session.id }
-        if let workspace = selectedWorkspace {
-            sessionsByWorkspace[workspace.id] = sessions
-        }
-        if selectedSession?.id == session.id {
-            selectedSession = sessions.first
+        if sessions.contains(where: { $0.id == session.id }) {
+            session.cleanup()
+            sessions.removeAll { $0.id == session.id }
+            if let workspace = selectedWorkspace {
+                sessionsByWorkspace[workspace.id] = sessions
+            }
+            if selectedSession?.id == session.id {
+                selectedSession = sessions.first
+            }
+        } else if let workspaceId = sessionsByWorkspace.first(where: { $0.value.contains { $0.id == session.id } })?.key {
+            // CLI는 선택되지 않은 워크스페이스의 탭도 닫는다. 화면 선택은 건드리지 않는다.
+            session.cleanup()
+            let remaining = (sessionsByWorkspace[workspaceId] ?? []).filter { $0.id != session.id }
+            sessionsByWorkspace[workspaceId] = remaining
+            if selectedSessionIdByWorkspace[workspaceId] == session.id {
+                selectedSessionIdByWorkspace[workspaceId] = remaining.first?.id
+            }
+        } else {
+            return
         }
         persistWindowState()
     }
@@ -517,7 +529,9 @@ class AppState: ObservableObject {
     private func ensureSessions(for workspace: Workspace) {
         sessions = sessionsByWorkspace[workspace.id] ?? []
         // 메인 탭 보장: 닫혔거나 처음이면 재생성 → tmux 세션에 재attach (스펙 §5)
-        if !sessions.contains(where: { $0.kind == .tmuxMain }) && TmuxBootstrap.isTmuxAvailable {
+        // 원격 워크스페이스의 tmux는 저쪽 머신에 있으므로 로컬 tmux 유무와 무관하다.
+        if !sessions.contains(where: { $0.kind == .tmuxMain })
+            && (TmuxBootstrap.isTmuxAvailable || workspace.isRemote) {
             let main = makeMainTab(for: workspace)
             sessions.insert(main, at: 0)
         }

@@ -245,9 +245,17 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     }
 
     func retargeted(to host: String?) -> TerminalSession {
-        TerminalSession(id: id, kind: kind, name: name, workingDirectory: workingDirectory,
-                        tmuxSessionName: tmuxSessionName, remoteHost: host,
-                        quickLaunch: quickLaunch, quickConfiguration: quickConfiguration)
+        // 셸 탭 이름은 실행 위치를 말한다 ("zsh" / "shell@arch"). 위치가 바뀌면 함께 바꾼다.
+        let retargetedName = kind == .shell && name == Self.defaultShellName(remoteHost: remoteHost)
+            ? Self.defaultShellName(remoteHost: host) : name
+        return TerminalSession(id: id, kind: kind, name: retargetedName, workingDirectory: workingDirectory,
+                               tmuxSessionName: tmuxSessionName, remoteHost: host,
+                               quickLaunch: quickLaunch, quickConfiguration: quickConfiguration)
+    }
+
+    static func defaultShellName(remoteHost: String?) -> String {
+        guard let host = remoteHost?.trimmingCharacters(in: .whitespacesAndNewlines), !host.isEmpty else { return "zsh" }
+        return "shell@\(host)"
     }
 
     /// WKWebView 프로세스 크래시: 페이지 리로드 + PTY 재시작.

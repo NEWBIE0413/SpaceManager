@@ -95,4 +95,14 @@ final class RemoteReconnectTests: XCTestCase {
         XCTAssertEqual(remote.remoteHost, "arch")
         XCTAssertNil(remote.retargeted(to: nil).remoteHost)
     }
+
+    func testRetargetRenamesOnlyDefaultShellNames() {
+        let shell = TerminalSession(kind: .shell, name: "zsh", workingDirectory: "/tmp")
+        let remote = shell.retargeted(to: "arch")
+        XCTAssertEqual(remote.name, "shell@arch")
+        XCTAssertEqual(remote.retargeted(to: nil).name, "zsh")
+        let tmux = TerminalSession(kind: .tmuxExtra, name: "flat-2", workingDirectory: "/tmp", tmuxSessionName: "flat-2")
+        XCTAssertEqual(tmux.retargeted(to: "arch").name, "flat-2")
+        [shell, remote, tmux].forEach { $0.cleanup() }
+    }
 }

@@ -134,12 +134,16 @@ enum ControlCommands {
             return describe(session, selected: true)
 
         case "tab.select", "tab.close", "tab.reconnect":
-            let (entry, session) = try tab(r)
+            let (entry, workspace, session) = try tab(r)
             if r.command == "tab.reconnect" {
                 session.reconnectIfNeeded()
                 return describe(session, selected: entry.state.selectedSession?.id == session.id)
             }
             if r.command == "tab.select" {
+                // 다른 워크스페이스의 탭이면 그 워크스페이스로 먼저 옮긴다 (같은 세션 객체가 복원된다).
+                if let workspace, entry.state.selectedWorkspace?.id != workspace.id {
+                    entry.state.selectWorkspace(workspace)
+                }
                 entry.state.selectSession(session)
                 if r.bool("focus") ?? true { focus(entry) }
                 return describe(session, selected: true)
@@ -343,19 +347,48 @@ enum ControlCommands {
         return fresh
     }
 
-    private static func tab(_ r: ControlRequest) throws -> (WindowEntry, TerminalSession) {
+    /// 탭 질의 대상. `sm tabs <ws>`는 선택되지 않은 워크스페이스의 탭도 보여 주므로,
+    /// 거기서 얻은 ID·이름은 화면 선택과 무관하게 찾아져야 한다.
+    private static func tab(_ r: ControlRequest) throws -> (WindowEntry, Workspace?, TerminalSession) {
         guard let query = r.string("tab") else { throw fail("tab required") }
-        let lower = query.lowercased()
-        for entry in liveWindows() {
-            let sessions = entry.state.sessions
-            if let hit = sessions.first(where: { $0.id.uuidString.lowercased() == lower })
-                ?? sessions.first(where: { $0.name == query || $0.tmuxSessionName == query })
-                ?? (Int(query).flatMap { sessions.indices.contains($0) ? sessions[$0] : nil })
-                ?? (query.count >= 4 ? sessions.first { $0.id.uuidString.lowercased().hasPrefix(lower) } : nil) {
-                return (entry, hit)
+        var groups: [(entry: WindowEntry, workspace: Workspace?, sessions: [TerminalSession])] = []
+        if r.string("ws") != nil {
+            let (entry, ws) = try workspace(r)
+            groups = [(entry, ws, entry.state.sessions(for: ws))]
+        } else {
+            // 첫 그룹 = 대상 창(기본 key 창)의 보이는 탭 목록. 인덱스는 이 목록 기준이다.
+            let front = try window(r)
+            let others = r.string("window") == nil ? liveWindows().filter { $0.state !== front.state } : []
+            for entry in [front] + others {
+                let selectedID = entry.state.selectedWorkspace?.id
+                groups.append((entry, entry.state.selectedWorkspace, entry.state.sessions))
+                for ws in entry.state.workspaces where ws.id != selectedID {
+                    groups.append((entry, ws, entry.state.sessions(for: ws)))
+                }
             }
         }
-        throw fail("tab not found: \(query)")
+        guard let hit = matchTab(query, in: groups.map(\.sessions)) else { throw fail("tab not found: \(query)") }
+        let group = groups[hit.group]
+        return (group.entry, group.workspace, hit.session)
+    }
+
+    /// 우선순위: 정확한 id → 이름/tmux 세션명 → 인덱스(첫 그룹만) → id 접두사(4자 이상).
+    /// 각 단계는 그룹 순서대로 훑으므로 같은 이름이면 보이는 탭이 이긴다.
+    nonisolated static func matchTab(_ query: String, in groups: [[TerminalSession]]) -> (group: Int, session: TerminalSession)? {
+        let lower = query.lowercased()
+        func first(_ match: (TerminalSession) -> Bool) -> (group: Int, session: TerminalSession)? {
+            for (index, sessions) in groups.enumerated() {
+                if let hit = sessions.first(where: match) { return (index, hit) }
+            }
+            return nil
+        }
+        if let hit = first({ $0.id.uuidString.lowercased() == lower }) { return hit }
+        if let hit = first({ $0.name == query || $0.tmuxSessionName == query }) { return hit }
+        if let index = Int(query), let visible = groups.first, visible.indices.contains(index) {
+            return (0, visible[index])
+        }
+        guard query.count >= 4 else { return nil }
+        return first { $0.id.uuidString.lowercased().hasPrefix(lower) }
     }
 
     private static func focus(_ entry: WindowEntry) {
