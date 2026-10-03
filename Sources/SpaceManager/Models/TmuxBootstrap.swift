@@ -215,10 +215,16 @@ enum TmuxBootstrap {
 
     /// 로컬 셸이 실행할 한 줄: `ssh -t host 'bash -lc <script>'`. `-t`로 원격에 pty를 주어
     /// tmux가 붙을 수 있게 하고, keepalive로 슬립/네트워크 전환 시 죽은 세션을 빨리 정리한다.
-    static func remoteLaunchCommand(host: String, remoteScript: String) -> String {
+    ///
+    /// `errorLog`를 주면 ssh 자신의 stderr만 그 파일로 보낸다. 원격 프로그램의 출력은 `-t`
+    /// pty를 거쳐 stdout으로 오므로 화면은 그대로다. ssh는 끊길 때 "Connection to … closed
+    /// by remote host."를 `-q`·LogLevel과 무관하게 터미널에 직접 쓰는데(OpenSSH 10.5 실측),
+    /// 재연결 탭은 끊기기 전 화면을 그대로 보여 줘야 하므로 이 문구가 화면에 남으면 안 된다.
+    static func remoteLaunchCommand(host: String, remoteScript: String, errorLog: String? = nil) -> String {
         let remoteCommand = "bash -lc " + remoteScript.shQuoted
+        let redirect = errorLog.map { " 2>" + $0.shQuoted } ?? ""
         return "exec ssh -t -o ConnectTimeout=8 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 "
-            + host.shQuoted + " -- " + remoteCommand.shQuoted
+            + host.shQuoted + " -- " + remoteCommand.shQuoted + redirect
     }
 
     /// 원격 워크스페이스의 순수 셸 탭: 원격 디렉토리에서 로그인 셸.

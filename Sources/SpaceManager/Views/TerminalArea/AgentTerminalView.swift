@@ -16,8 +16,42 @@ struct AgentTerminalView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
+            // 재연결 중에도 터미널을 그대로 둔다 — 끊기기 전 마지막 화면 위에 문구만 얹는다.
             SessionTerminalWrapper(session: session)
+                .overlay(alignment: .topTrailing) {
+                    if session.isReconnecting {
+                        ReconnectingBadge(detail: session.lastConnectionFailure) {
+                            session.reconnectIfNeeded()
+                        }
+                    }
+                }
         }
+    }
+}
+
+/// 터미널 우상단의 재연결 표시. 터미널과 같은 글꼴·셀 높이로 tmux 메시지 줄처럼 그려
+/// 화면의 일부로 읽히게 한다. 애니메이션은 없다 — 호스트가 잠든 동안 몇 시간이고 떠 있을
+/// 수 있어, 프레임마다 메인 스레드를 깨우는 표시는 그 시간 내내 CPU를 쓴다.
+private struct ReconnectingBadge: View {
+    let detail: String?
+    let retryNow: () -> Void
+
+    /// terminal.html의 xterm 설정(D2Coding 우선, 13pt)과 맞춘다.
+    private static let font = Font(NSFont(name: "D2Coding", size: 13)
+        ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular))
+
+    var body: some View {
+        Text(" 연결 재시도 중… ")
+            .font(Self.font)
+            .foregroundColor(Color(red: 0x1e / 255, green: 0x1e / 255, blue: 0x1e / 255))
+            .background(Color.reconnectAmber)
+            .padding(.top, 2)
+            // 카드의 둥근 모서리에 끝 글자가 잘리지 않게 곡선 안쪽으로 들인다.
+            .padding(.trailing, 16)
+            .onTapGesture(perform: retryNow)
+            .help(detail.map { "\($0)\n클릭하면 바로 다시 연결합니다" } ?? "클릭하면 바로 다시 연결합니다")
+            .accessibilityLabel("원격 연결 재시도 중")
+            .accessibilityAddTraits(.isButton)
     }
 }
 

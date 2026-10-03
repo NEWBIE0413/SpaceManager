@@ -438,6 +438,7 @@ enum ControlCommands {
             "running": s.isRunning,
             "reconnecting": s.isReconnecting,
             "error": s.startError ?? "",
+            "lastConnectionFailure": s.lastConnectionFailure ?? "",
             "selected": selected,
         ]
     }

@@ -17,7 +17,11 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     @Published var name: String
     @Published var isRunning: Bool = false
     @Published var startError: String?
+    /// 원격 tmux 연결이 끊겨 다시 붙는 중. 새 연결이 첫 출력을 보낼 때까지 유지된다 —
+    /// ssh 접속(프록시 경유 수 초) 동안에도 화면은 끊기기 전 그대로 두고 배지만 띄운다.
     @Published private(set) var isReconnecting = false
+    /// 마지막으로 실패한 연결에서 ssh가 남긴 한 줄. 배지 툴팁에만 쓴다.
+    @Published private(set) var lastConnectionFailure: String?
     var workingDirectory: String
     /// tmuxMain/tmuxExtra가 attach할 세션명 (shell이면 nil)
     let tmuxSessionName: String?
@@ -36,6 +40,10 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     private var isTrackingQuickTitle = false
     private var reconnectTimer: Timer?
     private var reconnectAttempt = 0
+    /// 원격 tmux 탭의 ssh stderr. 탭 id가 아니라 객체마다 따로 둔다 — 호스트 전환은 같은
+    /// id로 새 세션을 만들기 때문에, 옛 객체가 정리되며 새 객체의 로그를 지우면 안 된다.
+    let sshErrorLogPath = (NSTemporaryDirectory() as NSString)
+        .appendingPathComponent("space-manager-ssh-\(UUID().uuidString).log")
 
     init(id: UUID = UUID(), kind: TabKind, name: String,
          workingDirectory: String, tmuxSessionName: String? = nil,
@@ -59,7 +67,12 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
         let palette: TerminalPalette = kind == .quick ? .quickLight : .workspaceDark
         let view = TerminalWebView(frame: .zero, palette: palette)
         view.translatesAutoresizingMaskIntoConstraints = false
-        view.onUserInput = { [weak self] data in self?.pty?.write(data) }
+        view.onUserInput = { [weak self] data in
+            // 재연결 중 화면은 지난 스냅숏이다. 접속 중인 ssh는 아직 cooked 모드라 입력을
+            // 로컬 에코로 화면에 덧쓰고, 접속 뒤에는 모아 둔 키를 원격 tmux에 쏟아낸다.
+            guard let self, self.acceptsInput else { return }
+            self.pty?.write(data)
+        }
         view.onResize = { [weak self] cols, rows in self?.pty?.resize(cols: cols, rows: rows) }
         // PTY는 xterm 페이지 ready 이후에 시작해야 초기 출력이 유실되지 않는다
         view.onReady = { [weak self] in self?.startIfNeeded() }
@@ -84,7 +97,7 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     }
 
     private func startPTY() {
-        cancelReconnect()
+        cancelReconnectTimer()
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let execName = "-" + (shell as NSString).lastPathComponent
         var env = ProcessInfo.processInfo.environment
@@ -111,18 +124,31 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
             // 원격 디렉토리는 폴백 전 원래 경로에서 계산한다 — 로컬에 없어도 원격엔 있다.
             remoteDirectory: TmuxBootstrap.remoteDirectory(forLocalPath: workingDirectory),
             quickLaunch: quickLaunch,
-            quickConfiguration: quickConfiguration
+            quickConfiguration: quickConfiguration,
+            sshErrorLog: sshErrorLogPath
         )
 
         let pty = PTYProcess()
         let view = terminalView
-        pty.onOutput = { [weak view] data in view?.feed(data) }   // feed 내부에서 메인 큐 배칭
+        let firstOutput = isReconnecting ? FirstOutputLatch() : nil
+        pty.onOutput = { [weak self, weak view, weak pty] data in
+            view?.feed(data)   // feed 내부에서 메인 큐 배칭
+            // 원격의 첫 바이트 = tmux attach의 전체 재도장. ssh 자신의 오류는 로그로 빠지므로
+            // 접속 실패는 여기 오지 않는다. 한계: 원격 스크립트가 tmux 전에 실패하면(systemctl 등)
+            // 그 오류가 첫 바이트로 화면에 찍히고 배지가 잠깐 내려간다 — 잦아지면 tmux의
+            // alt-screen 진입(ESC[?1049h)을 볼 때까지 출력을 붙잡는 방식으로 바꾼다.
+            guard let firstOutput, firstOutput.fire() else { return }
+            DispatchQueue.main.async {
+                guard let self, let pty, self.pty === pty else { return }
+                self.connectionResumed()
+            }
+        }
         let launchedAt = Date()
         pty.onExit = { [weak self, weak pty] code in
             DispatchQueue.main.async {
                 guard let self, let pty, self.pty === pty, self.started else { return }
                 self.isRunning = false
-                self.scheduleReconnect(exitCode: code, connectedFor: Date().timeIntervalSince(launchedAt))
+                self.handleExit(exitCode: code, connectedFor: Date().timeIntervalSince(launchedAt))
             }
         }
         do {
@@ -213,29 +239,54 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     /// 죽은 탭 재시작 (프로세스 종료·시작 실패 후 재시도)
     func restartIfDead() {
         guard started, pty?.isRunning != true else { return }
-        cancelReconnect()
+        cancelReconnectTimer()
         pty?.terminate()
         pty = nil
         startError = nil
         startPTY()
     }
 
-    private func scheduleReconnect(exitCode: Int32, connectedFor: TimeInterval) {
+    /// PTY 종료 처리. 원격 tmux의 비정상 종료만 재연결하고, 그 동안 터미널 화면은
+    /// 끊기기 전 마지막 프레임을 유지한다 (오류 화면으로 바꾸지 않는다).
+    func handleExit(exitCode: Int32, connectedFor: TimeInterval) {
         guard let delay = RemoteReconnectPolicy.delay(kind: kind, remoteHost: remoteHost,
-            exitCode: exitCode, attempt: reconnectAttempt, connectedFor: connectedFor) else { return }
+            exitCode: exitCode, attempt: reconnectAttempt, connectedFor: connectedFor) else {
+            // detach(0)처럼 의도된 종료는 재시도 배지를 남기지 않는다.
+            isReconnecting = false
+            return
+        }
         if connectedFor >= 30 { reconnectAttempt = 0 }
         reconnectAttempt += 1
+        lastConnectionFailure = Self.lastLogLine(at: sshErrorLogPath) ?? lastConnectionFailure
         isReconnecting = true
-        startError = "연결이 끊겼습니다. \(Int(delay))초 뒤 다시 연결합니다."
+        reconnectTimer?.invalidate()
         reconnectTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             self?.restartIfDead()
         }
     }
 
-    private func cancelReconnect() {
+    /// 새 연결이 원격 화면을 보내기 시작했다 — 배지를 내리고 입력을 다시 받는다.
+    func connectionResumed() {
+        guard isReconnecting else { return }
+        isReconnecting = false
+        lastConnectionFailure = nil
+    }
+
+    var acceptsInput: Bool { !isReconnecting }
+
+    private func cancelReconnectTimer() {
         reconnectTimer?.invalidate()
         reconnectTimer = nil
-        isReconnecting = false
+    }
+
+    /// ssh 로그의 마지막 비어 있지 않은 줄. 접속마다 `2>`로 새로 쓰므로 직전 시도의 원인이다.
+    static func lastLogLine(at path: String) -> String? {
+        guard let data = FileManager.default.contents(atPath: path),
+              let text = String(data: data.suffix(4096), encoding: .utf8) ?? String(data: data.suffix(4096), encoding: .isoLatin1) else { return nil }
+        let line = text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty }
+        return line.map { String($0.prefix(240)) }
     }
 
     /// CLI도 화면 선택과 같은 경로로 죽은 연결을 복구한다. 실행 중인 tmux는 건드리지 않는다.
@@ -261,7 +312,7 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
     /// WKWebView 프로세스 크래시: 페이지 리로드 + PTY 재시작.
     /// tmux 세션은 서버에 살아있으므로 재attach로 무손실 복구된다 (스펙 §7).
     private func recoverFromCrash() {
-        cancelReconnect()
+        cancelReconnectTimer()
         pty?.terminate()
         pty = nil
         started = false          // 리로드 후 ready가 다시 오면 startIfNeeded가 재시작
@@ -276,7 +327,9 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
 
     func cleanup(force: Bool = false) {
         started = false
-        cancelReconnect()
+        cancelReconnectTimer()
+        isReconnecting = false
+        try? FileManager.default.removeItem(atPath: sshErrorLogPath)
         if isTrackingQuickTitle { QuickConversationScanner.shared.untrack(owner: id) }
         isTrackingQuickTitle = false
         quickIdentityTimer?.invalidate()
@@ -290,6 +343,7 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
 
     deinit {
         reconnectTimer?.invalidate()
+        try? FileManager.default.removeItem(atPath: sshErrorLogPath)
         quickIdentityTimer?.invalidate()
         if isTrackingQuickTitle { QuickConversationScanner.shared.untrack(owner: id) }
     }
@@ -307,7 +361,8 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
         remoteHost: String? = nil,
         remoteDirectory: TmuxBootstrap.RemoteDirectory? = nil,
         quickLaunch: QuickLaunch? = nil,
-        quickConfiguration: QuickSessionConfiguration = .default
+        quickConfiguration: QuickSessionConfiguration = .default,
+        sshErrorLog: String? = nil
     ) -> [String] {
         if kind == .quick {
             return ["-lc", QuickSessionPolicy.launchCommand(
@@ -320,7 +375,7 @@ final class TerminalSession: Identifiable, ObservableObject, Equatable {
             let dir = remoteDirectory ?? TmuxBootstrap.remoteDirectory(forLocalPath: workingDirectory)
             if let tmuxSessionName {
                 let script = TmuxBootstrap.remoteStartupScript(sessionName: tmuxSessionName, remoteDirectory: dir)
-                return ["-lc", TmuxBootstrap.remoteLaunchCommand(host: remoteHost, remoteScript: script)]
+                return ["-lc", TmuxBootstrap.remoteLaunchCommand(host: remoteHost, remoteScript: script, errorLog: sshErrorLog)]
             }
             return ["-lc", TmuxBootstrap.remoteShellCommand(host: remoteHost, remoteDirectory: dir)]
         }
@@ -344,6 +399,16 @@ enum RemoteReconnectPolicy {
               exitCode != 0 else { return nil }
         let failures = connectedFor >= 30 ? 0 : min(4, max(0, attempt))
         return min(30, 3 * pow(2, Double(failures)))
+    }
+}
+
+/// PTY io 큐에서만 만지는 일회성 플래그 — 첫 출력에서 한 번만 메인으로 알린다.
+private final class FirstOutputLatch {
+    private var fired = false
+    func fire() -> Bool {
+        guard !fired else { return false }
+        fired = true
+        return true
     }
 }
 

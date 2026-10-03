@@ -45,6 +45,16 @@
   term.onResize(function (s) { post('resize', { cols: s.cols, rows: s.rows }); });
   fit.fit();
 
+  // OSC 52 클립보드 쓰기. 원격 tmux는 복사 내용을 이 이스케이프로 클라이언트에 보낸다
+  // (set-clipboard on) — 그쪽 xclip은 아치의 클립보드라 Mac에는 닿지 않는다. 쓰기만 받고
+  // 읽기 질의('?')는 무시한다: 터미널 안 프로그램이 Mac 클립보드를 읽어 가면 안 된다.
+  term.parser.registerOscHandler(52, function (data) {
+    var sep = data.indexOf(';');
+    var payload = sep < 0 ? '' : data.slice(sep + 1);
+    if (payload && payload !== '?') { post('clipboard', payload); }
+    return true;
+  });
+
   // Cmd+C/V/A는 네이티브(Swift)가 처리하므로 xterm이 삼키지 않게 통과시킨다
   term.attachCustomKeyEventHandler(function (e) {
     if (e.metaKey && ['c', 'v', 'a'].indexOf(e.key.toLowerCase()) >= 0) { return false; }

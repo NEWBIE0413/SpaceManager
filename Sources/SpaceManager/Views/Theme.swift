@@ -6,6 +6,8 @@ extension Color {
     static let warmPink = Color(red: 0.95, green: 0.45, blue: 0.50)
     /// Slightly muted warm pink for section headers
     static let warmPinkMuted = Color(red: 0.78, green: 0.48, blue: 0.50)
+    /// 재연결 상태. tmux 메시지 줄(노랑 바탕·검정 글자)을 따라 터미널 안의 TUI 문구처럼 읽힌다.
+    static let reconnectAmber = Color(red: 0.84, green: 0.69, blue: 0.37)
 }
 
 /// 사이드바 공통 룩 — 행 높이·아이콘 크기·라운딩을 한 곳에서 통일한다.

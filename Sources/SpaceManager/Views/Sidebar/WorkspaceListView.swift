@@ -316,7 +316,9 @@ struct WorkspaceTabRow: View {
     var body: some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(session.isRunning
+                .fill(session.isReconnecting
+                      ? Color.reconnectAmber.opacity(isSelected ? 1 : 0.6)
+                      : session.isRunning
                       ? Color.green.opacity(isSelected ? 1 : 0.5)
                       : Color.gray.opacity(isSelected ? 1 : 0.5))
                 .frame(width: 5, height: 5)

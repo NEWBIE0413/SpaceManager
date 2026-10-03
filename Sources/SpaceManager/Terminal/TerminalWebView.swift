@@ -79,6 +79,11 @@ final class TerminalWebView: NSView {
     var onResize: ((UInt16, UInt16) -> Void)?
     var onReady: (() -> Void)?
     var onWebProcessCrash: (() -> Void)?
+    /// Cmd+C와 OSC 52가 함께 쓰는 단일 쓰기 경로. 테스트는 실제 페이스트보드 대신 주입한다.
+    var writeClipboard: (String) -> Void = { text in
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
 
     private(set) var lastCols: UInt16 = 80
     private(set) var lastRows: UInt16 = 24
@@ -245,10 +250,9 @@ final class TerminalWebView: NSView {
         guard flags.contains(.command) else { return super.performKeyEquivalent(with: event) }
         switch event.charactersIgnoringModifiers {
         case "c":
-            webView.evaluateJavaScript("window.smGetSelection()") { result, _ in
+            webView.evaluateJavaScript("window.smGetSelection()") { [weak self] result, _ in
                 guard let text = result as? String, !text.isEmpty else { return }
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(text, forType: .string)
+                self?.writeClipboard(text)
             }
             return true
         case "v":
@@ -290,6 +294,11 @@ final class TerminalWebView: NSView {
             let completion = presentationCompletion
             presentationCompletion = nil
             completion?()
+        case "clipboard":
+            if let payload = dict["payload"] as? String,
+               let text = TerminalClipboard.decodeOSC52(payload) {
+                writeClipboard(text)
+            }
         case "input":
             if let s = dict["payload"] as? String {
                 onUserInput?(Data(s.utf8))
@@ -311,6 +320,21 @@ final class TerminalWebView: NSView {
     fileprivate func handleWebProcessCrash() {
         isReady = false
         onWebProcessCrash?()
+    }
+}
+
+/// OSC 52 페이로드(base64) 해석. 빈 값·읽기 질의·깨진 base64·비UTF-8은 버린다 —
+/// 잘못된 시퀀스 하나가 사용자의 클립보드를 비워 버리면 안 된다.
+enum TerminalClipboard {
+    /// 원격 프로그램이 터미널로 거대한 페이로드를 밀어 넣어도 페이스트보드를 채우지 않는다.
+    static let maxEncodedBytes = 8 << 20
+
+    static func decodeOSC52(_ payload: String) -> String? {
+        guard !payload.isEmpty, payload != "?", payload.utf8.count <= maxEncodedBytes,
+              let data = Data(base64Encoded: payload, options: .ignoreUnknownCharacters),
+              !data.isEmpty,
+              let text = String(data: data, encoding: .utf8) else { return nil }
+        return text
     }
 }
 

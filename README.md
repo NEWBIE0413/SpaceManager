@@ -171,8 +171,20 @@ cheap.
 
 An interrupted remote tmux connection reconnects after 3 seconds, with failed
 attempts backing off to 30 seconds. An explicit tmux detach and transient shell
-or Quick tabs remain closed. Selecting a disconnected tab or running
-`sm tab reconnect <tab>` retries immediately.
+or Quick tabs remain closed. Selecting a disconnected tab, clicking the badge, or
+running `sm tab reconnect <tab>` retries immediately.
+
+While it reconnects, the tab keeps the last frame it received and shows
+`연결 재시도 중…` in the terminal's top-right corner until the new connection
+draws its first output. Keystrokes are dropped during that time so nothing typed
+at the frozen screen reaches tmux after the reconnect. ssh prints "Connection to
+… closed by remote host." straight to the terminal whatever its log level, so
+remote tmux tabs send ssh's own stderr to a per-tab temporary log; the badge
+tooltip shows its last line.
+
+Copying in remote tmux reaches the Mac clipboard through OSC 52 (tmux
+`set-clipboard on` or `external`). The terminal accepts clipboard writes and
+ignores clipboard read requests.
 
 On a Linux host with `tmux-resurrect` installed under `~/.tmux/plugins`, copy
 `scripts/{remote-tmux-persistence.sh,tmux-session-metadata.py,install-remote-tmux-persistence.sh}`

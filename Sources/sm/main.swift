@@ -192,7 +192,7 @@ func render(command: String, result: Any) -> String {
         return table([["", "name", "tmux", "host", "path", "win"]] + rows)
     case "tab.list":
         let rows = (result as? [[String: Any]] ?? []).enumerated().map { i, t in
-            [String(i), str(t["selected"]) == "yes" ? "*" : "", str(t["kind"]), str(t["name"]), str(t["remoteHost"]).isEmpty ? "" : "@" + str(t["remoteHost"]), str(t["running"]) == "yes" ? "running" : "idle", short(t["id"])]
+            [String(i), str(t["selected"]) == "yes" ? "*" : "", str(t["kind"]), str(t["name"]), str(t["remoteHost"]).isEmpty ? "" : "@" + str(t["remoteHost"]), str(t["reconnecting"]) == "yes" ? "reconnecting" : str(t["running"]) == "yes" ? "running" : "idle", short(t["id"])]
         }
         return table([["#", "", "kind", "name", "host", "state", "id"]] + rows)
     case "quick.list":
