@@ -192,6 +192,62 @@ struct WorkspaceHostChoices: View {
     }
 }
 
+/// 활동 점 둘레의 스피너.
+///
+/// SwiftUI `repeatForever` 회전은 매 프레임 메인 스레드 트랜잭션을 커밋하고,
+/// `isMovableByWindowBackground` 창에서는 커밋마다 AppKit이 뷰 트리 전체로
+/// 드래그 영역을 다시 계산한다(스피너 하나에 CPU +25%p 측정). 회전을
+/// CABasicAnimation으로 렌더 서버에 넘겨 메인 스레드가 프레임마다 깨지 않게 한다.
+private struct ActivitySpinner: NSViewRepresentable {
+    func makeNSView(context: Context) -> ActivitySpinnerView { ActivitySpinnerView() }
+    func updateNSView(_ nsView: ActivitySpinnerView, context: Context) {}
+}
+
+/// 장식 전용 레이어 뷰. 행 안에 박힌 AppKit 뷰는 SwiftUI 탭 제스처보다 먼저
+/// hit-test되고, 배경 드래그 창에서는 투명 NSView 클릭이 창 이동으로 바뀐다.
+/// 스피너가 도는 행을 눌러도 선택·툴팁이 그대로 동작하도록 포인터를 통과시킨다.
+final class ActivitySpinnerView: NSView {
+    private let arc = CAShapeLayer()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        arc.fillColor = nil
+        arc.strokeColor = NSColor(Color.warmPink.opacity(0.75)).cgColor
+        arc.lineWidth = 1.2
+        arc.lineCap = .round
+        arc.strokeEnd = 0.72
+        layer?.addSublayer(arc)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        // 독립 sublayer의 frame/path 변경은 기본 0.25초 암묵 애니메이션을 탄다.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        arc.frame = bounds
+        arc.path = CGPath(ellipseIn: bounds.insetBy(dx: 0.6, dy: 0.6), transform: nil)
+        CATransaction.commit()
+    }
+
+    // 창에 붙을 때마다 다시 건다 — 창에서 떨어지면 CA가 애니메이션을 제거한다.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        arc.removeAnimation(forKey: "spin")
+        guard window != nil else { return }
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.fromValue = 0
+        spin.toValue = -2 * Double.pi   // AppKit 좌표계(y 위)에서 시계 방향
+        spin.duration = 0.9
+        spin.repeatCount = .infinity
+        arc.add(spin, forKey: "spin")
+    }
+}
+
 /// 워크스페이스 행의 활동 점.
 ///
 /// 점의 진하기 = 마지막 Claude 대화의 최근성. 방금 대화했으면 선명한 warmPink,
@@ -201,7 +257,6 @@ struct WorkspaceHostChoices: View {
 struct WorkspaceActivityDot: View {
     let lastConversation: Date?
     let isGenerating: Bool
-    @State private var spin = false
 
     /// 최근성 → 진하기. 4시간 반감기의 지수 곡선으로 방금/3시간/12시간/어제를
     /// 눈으로 구분하되, 24시간 경계에서는 완전히 사라진다.
@@ -227,15 +282,8 @@ struct WorkspaceActivityDot: View {
             }
 
             if isGenerating {
-                Circle()
-                    .trim(from: 0, to: 0.72)
-                    .stroke(Color.warmPink.opacity(0.75),
-                            style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
+                ActivitySpinner()
                     .frame(width: 12, height: 12)
-                    .rotationEffect(.degrees(spin ? 360 : 0))
-                    .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: spin)
-                    .onAppear { spin = true }
-                    .onDisappear { spin = false }
             }
         }
         .frame(width: 14, height: 14)

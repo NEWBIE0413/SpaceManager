@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import SpaceManager
 
@@ -21,5 +22,16 @@ final class WorkspaceActivityDotTests: XCTestCase {
         XCTAssertNotNil(WorkspaceActivityDot.recencyOpacity(age: RecentActivityScanner.dotWindow - 1))
         XCTAssertNil(WorkspaceActivityDot.recencyOpacity(age: RecentActivityScanner.dotWindow))
         XCTAssertNil(WorkspaceActivityDot.recencyOpacity(age: -1))
+    }
+}
+
+final class ActivitySpinnerViewTests: XCTestCase {
+    /// 생성 중 행의 스피너 위를 눌러도 행 선택이 되고 창이 끌리지 않아야 한다.
+    func testSpinnerNeverCapturesPointer() {
+        let spinner = ActivitySpinnerView(frame: NSRect(x: 0, y: 0, width: 12, height: 12))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 40, height: 40))
+        container.addSubview(spinner)
+        XCTAssertNil(spinner.hitTest(NSPoint(x: 6, y: 6)))
+        XCTAssertTrue(container.hitTest(NSPoint(x: 6, y: 6)) === container)
     }
 }
